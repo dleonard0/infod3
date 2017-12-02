@@ -1,0 +1,4 @@
+*.o
+t-match
+t-store
+.*.swp
