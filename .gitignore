@@ -1,4 +1,5 @@
 *.o
 t-match
 t-store
+t-proto
 .*.swp

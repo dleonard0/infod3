@@ -1,0 +1,217 @@
+
+infod3 protocol
+
+	The infod3 protocol is a client-server protocol. The server
+	maintains a key/value store, and connected client may
+	subscribe to changes by key pattern.
+
+	A client can send the following messages to the server:
+
+		HELLO <v><text>
+		SUB <pattern>
+		UNSUB <pattern>
+		GET <key>
+		PUT <key> [<value>]
+		BEGIN
+		COMMIT
+		PING <id>
+
+	The server can send the following messags to the client:
+
+		VERSION <v><text>
+		INFO <key> [<value>]
+		PONG <id>
+		ERROR <text>
+
+	The client closes the connection at its pleasure.
+
+	The limit on the combined size of a key and value is 64kB,
+	including a NUL byte separator between the two.
+	The limit on the size of all message arguments is also 64kB.
+
+Client Commands
+
+	HELLO <v><text>
+
+	    The client indicates the protocol version it wishes to talk
+	    and optionally identifies itself to the server. This
+	    document describes version 0x00. This should be the first
+	    message. A client need not wait for the VERSION response
+	    before sending version 0x00 commands.
+
+	SUB <pattern>
+	UNSUB <pattern>
+
+	    The client's channel has associated a set of active
+	    subscriptions. The patterns are documented in match.h
+	    but are similar to glob(7).
+
+	    When a new subscription is received, the server will
+	    immediately send UPDATED messages for every matching key.
+	    Until an matching UNSUB, the server will asynchronously
+	    send INFO messages as the key's value changes.
+
+	GET <key>
+
+	    The server will respond with an INFO message for the key.
+
+	PUT <key> [<value>]
+
+	    The server will update the key's value.
+	    Unless a matching subscription is in place, this will
+	    happen silently.
+
+	PING <id>
+
+	    The server will respond with a matching PONG. This
+	    can be used for client synchronization.
+
+	BEGIN
+	COMMIT
+
+	    When a BEGIN message is sent to a server, it will
+	    record all subsequent commands up to the next matching
+	    COMMIT. When the COMMIT is received, all recorded
+	    commands are performed atomically relative to any
+	    other client. This can be used to query multiple
+	    keys coherently.
+
+	    A COMMIT without a matching BEGIN is ignored.
+
+Server messages
+
+	VERSION <v><text>
+
+	    This is the response to a HELLO command. The server
+	    indicates the highest compatible version number it can
+	    talk. It will be equal to or less than the HELLO's version.
+	    The <text> is optional and indicates the server.
+
+	INFO <key> [<value>]
+
+	    INFO messages are only sent as a result of GET or
+	    SUB commands. If the <value> is absent, the key
+	    has been deleted.
+
+	PONG <id>
+
+	    PONG messages are only sent as a response to PING
+	    commands.
+
+	ERROR <text>
+
+	    An ERROR message can be sent by the server at any time.
+	    The text is for human consumption and a client should
+	    log the message.
+	    The server may close the connection immediately after
+	    sending this message.
+
+Binary form of messages
+
+	Binary messages are of the form
+
+		message-id (1 octet)
+		message-length (2 octets, network endian, payload len)
+		message-payload (* octets)
+
+	Message IDs and their payloads
+
+		0x00 HELLO       <v><text>
+		0x01 SUB         <pattern>
+		0x02 UNSUB       <pattern>
+		0x03 GET         <key>
+		0x04 PUT         <key>[0x00 <value>]
+		0x05 BEGIN
+		0x06 COMMIT
+		0x07 PING        <id>
+
+		0x80 VERSION     <v><text>
+		0x81 INFO        <key>[0x00 <value>]
+		0x82 PONG        <id>
+		0x83 ERROR       <text>
+
+	The <v> version is a single byte. It is 0x00 for this version.
+	The GET message must not contain a NUL (0x00) in its <key>.
+	The PUT and INFO messages will not contain a NULL when the
+	message means a key deletion.
+	Each of <key>, <pattern> and <text> are in UTF-8.
+	The <id> used for pings is arbitrary-length binary.
+
+	A binary client must always send a HELLO message.
+
+	If a server sends an ERROR message in binary mode, it must
+	immediately close the connection.
+
+	The maxium size of a binary message is 65538 bytes.
+
+Text form of messages
+
+	The text form of a client channel consists of
+	lines terminated with <cr> or <lf>. Command words sent
+	by the client may be either upper or lowercase,
+	and redundant space characters <sp> are permitted.
+	Blank lines are ignored.
+
+	A server must switch to binary mode if it receives
+	a binary HELLO message commencing with 0x00.
+
+	The server will always respond in uppercase
+	and emit minimal space characters <sp>. It will
+	always terminate lines with <cr><lf>. It will
+	never send blank lines consisting of just <cr><lf>.
+
+	    <sp>* HELLO [<sp>+ <int> [<sp>+ <text>]] <sp>* <crlf>
+	    <sp>* SUB <sp>+ <pattern> <sp>* <crlf>
+	    <sp>* UNSUB <sp>+ <pattern> <sp>* <crlf>
+	    <sp>* GET <sp>+ <key> <sp>* <crlf>
+	    <sp>* PUT <sp>+ <key> [<sp>+ <value>] <sp>* <crlf>
+	    <sp>* BEGIN <sp>* <crlf>
+	    <sp>* COMMIT <sp>* <crlf>
+	    <sp>* PING [<sp>+ <ident>] <sp>* <crlf>
+
+	    VERSION <sp> <int> [<sp> <text>] <cr> <lf>
+	    INFO <sp> <key> [<sp> <value>] <cr> <lf>
+	    PONG <sp> [<ident>] <cr> <lf>
+	    ERROR <sp> <text> <cr> <lf>
+
+	<int> is a positive decimal integer smaller than 256. The server
+	will never generated superfluous leading 0s. The server will interpret
+	all received <int> as decimal. An empty <int> sent by
+	the clent must be interpreted as 0.
+	
+	If the client omits the HELLO message, the server must not send
+	a VERSION response. However, the server may assume any version
+	that is compatible with version 0.
+
+    String quoting
+
+	<ident>, <pattern>, <key>, <value> and <text> strings are encoded in
+	the following quoting system:
+
+		- If the string has no length, it is encoded as ""
+		- If the string contains only UTF-8 characters, excluding
+			<sp> <cr> <lf> "
+		  then it is encoded directly without quoting.
+		- Otherwise it is encoded enclosed in " with the
+		  following bytes escaped as the sequence \<oct><oct><oct>
+
+			<lf>	\012
+			<cr>	\015
+			"	\042
+			\	\134
+
+	The server will interpret all quoted \ooo sequences, but will
+	only generate the four octal sequences listed above.
+
+	If the server sends an ERROR message in response to a malformed
+	command, it should not close the connection.
+
+    Maximum line length
+
+        In the worst case, a compliant server will emit a line consisting of
+	262155 bytes. This corresponds to:
+	  - the longest word "VERSION" and space (8 bytes)
+	  - two quoted strings of all escapes, totalling 65535 bytes
+	  	(2 + 1 + 2 + 65535*4 bytes)
+	  - the trailing <cr><lf> (2 bytes)
+
