@@ -373,13 +373,20 @@ test_binary_proto()
 
 	p = proto_new();
 
+	/* Prepare to capture callbacks */
 	mock_on_error_clear();
 	proto_set_on_error(p, mock_on_error_fn);
+	proto_set_on_input(p, mock_on_input_fn);
+
+	/* Initially the protocol mode is unknown */
+	assert(proto_get_mode(p) == PROTO_MODE_UNKNOWN);
+
+	/* Auto-detect on the first hello message */
+	assert(proto_recv(p, "\x00\0\6\3Hello", 9) == 9);
+	assert(proto_get_mode(p) == PROTO_MODE_BINARY);
+	assert_mock_on_input(p, CMD_HELLO, "\3Hello");
 
 	/* Exercise receiving all of the message types [from net] */
-	proto_set_on_input(p, mock_on_input_fn);
-	assert(proto_recv(p, "\x00\0\6\3Hello", 9) == 9);
-	assert_mock_on_input(p, CMD_HELLO, "\3Hello");
 	assert(proto_recv(p, "\x00\0\1\3", 4) == 4);
 	assert_mock_on_input(p, CMD_HELLO, "\3");
 	assert(proto_recv(p, "\x01\0\4test", 7) == 7);
@@ -497,13 +504,21 @@ test_text_proto()
 
 	p = proto_new();
 
+	/* Initially the protocol mode is unknown */
+	assert(proto_get_mode(p) == PROTO_MODE_UNKNOWN);
+
+	/* Prepare capturing on_input() callbacks */
+	proto_set_on_input(p, mock_on_input_fn);
+
 #define assert_proto_recv(p, s) \
 	assert(proto_recv(p, s, sizeof s - 1) == sizeof s - 1)
 
-	/* Exercise receiving various quoting styles [from net] */
-	proto_set_on_input(p, mock_on_input_fn);
+	/* Recieving a text message auto-detects text mode */
 	assert_proto_recv(p, "hello 0\n");
+	assert(proto_get_mode(p) == PROTO_MODE_TEXT);
 	assert_mock_on_input(p, CMD_HELLO, "\0");
+
+	/* Exercise receiving various quoting styles [from net] */
 	assert_proto_recv(p, "hello 1 woo\n");
 	assert_mock_on_input(p, CMD_HELLO, "\1woo");
 	assert_proto_recv(p, "hello 2 \"woo\"\n");

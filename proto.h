@@ -61,3 +61,10 @@ void proto_set_on_sendv(struct proto *p,
 /* The default error handler is to print the message to stderr */
 void proto_set_on_error(struct proto *p,
     void (*on_error)(struct proto *p, const char *msg));
+
+#define PROTO_MODE_UNKNOWN	0	/* auto-detecting */
+#define PROTO_MODE_BINARY	1	/* TLV */
+#define PROTO_MODE_TEXT		2	/* telnet ascii */
+
+int proto_set_mode(struct proto *p, int mode);
+int proto_get_mode(struct proto *p);

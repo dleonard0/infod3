@@ -15,10 +15,7 @@
 #define ARRAY_SIZE(a) (sizeof (a) / sizeof (a)[0])
 
 struct proto {
-	unsigned int mode;
-#define UNKNOWN 0
-#define BINARY 1
-#define TEXT 2
+	int mode;
 	void *udata;
 	void (*udata_free)(void *udata);
 	int (*on_input)(struct proto *p, unsigned char msg,
@@ -159,7 +156,7 @@ proto_new()
 	struct proto *p = malloc(sizeof *p);
 	if (!p)
 		return NULL;
-	p->mode = 0;
+	p->mode = PROTO_MODE_UNKNOWN;
 	p->udata = NULL;
 	p->udata_free = NULL;
 	p->on_input = NULL;
@@ -213,6 +210,19 @@ proto_set_on_error(struct proto *p,
 	void (*on_error)(struct proto *p, const char *msg))
 {
 	p->on_error = on_error;
+}
+
+int
+proto_set_mode(struct proto *p, int mode)
+{
+	p->mode = mode;
+	return 0;
+}
+
+int
+proto_get_mode(struct proto *p)
+{
+	return p->mode;
 }
 
 /* -- error handling -- */
@@ -501,14 +511,14 @@ proto_recv(struct proto *p, const void *netv, unsigned int netlen)
 		return 0;
 	}
 
-	if (p->mode == UNKNOWN) {
+	if (p->mode == PROTO_MODE_UNKNOWN) {
 		if (net[0] == CMD_HELLO)
-			p->mode = BINARY;
+			p->mode = PROTO_MODE_BINARY;
 		else
-			p->mode = TEXT;
+			p->mode = PROTO_MODE_TEXT;
 	}
 
-	if (p->mode == BINARY)
+	if (p->mode == PROTO_MODE_BINARY)
 		return proto_recv_binary(p, net, netlen);
 	else
 		return proto_recv_text(p, net, netlen);
@@ -904,11 +914,11 @@ proto_output(struct proto *p, const char *fmt, ...)
 	va_list ap;
 	int ret;
 
-	if (p->mode == UNKNOWN)
-		p->mode = BINARY; /* prefer binary */
+	if (p->mode == PROTO_MODE_UNKNOWN)
+		p->mode = PROTO_MODE_BINARY; /* prefer binary */
 
 	va_start(ap, fmt);
-	if (p->mode == BINARY)
+	if (p->mode == PROTO_MODE_BINARY)
 		ret = proto_output_binary(p, fmt, ap);
 	else
 		ret = proto_output_text(p, fmt, ap);
