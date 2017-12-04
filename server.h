@@ -1,5 +1,15 @@
+#pragma once
 
+/*
+ * poll-based socket server
+ * - Only knows how to poll(), accept() and close() file descriptors.
+ * - Sets all accepted FDs to non-blocking.
+ * - Makes upcalls to handlers, which should read() and write().
+ * - Limits the number of active connections by ignoring
+ *   listener sockets when socket limit is reached.
+ */
 struct server;
+
 struct server_context {
 	/* Limit to the number of open sockets. 0 means no limit. */
 	unsigned int max_sockets;
@@ -34,25 +44,31 @@ struct server_context {
 	void (*on_error)(struct server *s, const char *msg);
 };
 
+/* Creates a new server instance with no client or listener sockets. */
 struct server *server_new(const struct server_context *c);
 
-/* Closes all clients and deallocates */
-void server_free(struct server *server);
-
-/* Adds a listener FD to the server. Only accept() will be called on this.
- * The fd will only be closed by server_free().
- * Returns -1 on error. */
+/* Adds a listener FD to the server.
+ * When it becomes ready for read, accept() will be called on fd and
+ * the resulting new socket will be added to the server.
+ * Returns -1 on error. (ENOMEM) */
 int server_add_listener(struct server *server, int fd, void *listener);
 
 /* Dispatch all pending I/O just once, possibly blocking.
  * Call this multiple times in a loop.
- * A timeout of -1 blocks forever.
- * Returns what poll() returned. */
+ * A timeout of -1 blocks forever. See poll().
+ * Returns what poll() returns. */
 int server_poll(struct server *server, int timeout);
 
-/* Shut down the read side of a FD, in order to trigger an on_ready()
- * callback. This is preferred over a blunt close() which can introduce
- * file descriptor re-use races. Instead, a half-closed FD will cause
- * on_ready() to be called, and read() will return -1.
+/* Shut down the read side of a FD.
+ * This should be used outside of on_ready() to trigger a future on_ready()
+ * callback on the FD. Inside of that on_ready(), a read() will return 0,
+ * and when 0 is returned to server_poll() it will perform an orderly
+ * close. This is preferred way to close a managed client file descriptor
+ * because invoking an uncontrolled close() will introduce file descriptor
+ * re-use races.
+ * Returns -1 on error (eg EBADF). See shutdown(2)
  */
 int shutdown_read(int fd);
+
+/* Closes all client sockets, listeners and deallocates resources */
+void server_free(struct server *server);

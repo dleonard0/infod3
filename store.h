@@ -1,3 +1,5 @@
+#pragma once
+#include <stdint.h>
 
 /*
  * An in-memory, reference-counted key/value store.
@@ -15,22 +17,19 @@
  *  index_next() - reads and advances the index. Returned info is incref'd, or
  *                 is NULL to indicate end of store. So the caller must decref.
  */
+struct store;
 
-#pragma once
-
-#include <stdint.h>
-
+/* A <key,value> element */
 struct info {
-	uint16_t sz;
+	uint16_t sz;				/* total size of key\0value */
 	uint16_t refcnt;
-	char keydata[];				/* <key>+NUL+<data> */
+	char keydata[];				/* key\0value */
 };
 struct info *info_new(uint16_t sz);		/* Initial refcnt is 1 */
 void info_decref(struct info *info);
 void info_incref(struct info *info);
 
 
-struct store;
 struct store *store_new(void);
 void store_free(struct store *);
 int store_put(struct store *store, struct info *info);
