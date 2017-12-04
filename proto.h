@@ -51,12 +51,17 @@ void proto_set_udata(struct proto *p, void *udata, void (*ufree)(void *));
 void *proto_get_udata(struct proto *p);
 
 /* Passs network-received pdu to the protocol.
- * A partial PDU may be received.
+ * A partial PDU may be received, except in PROTO_MODE_FRAMED, where
+ * the PDUs must be recv'd completely and independently.
  * Returns -1 on an unrecoverable error (eg ENOMEM). */
 int proto_recv(struct proto *p, const void *net, unsigned int netlen);
 /* Sets the callback for received decoded messages.
+ * At close, the callback will receive MSG_EOF.
  * On unrecoverable errors, the callback function should set errno
- * and return -1. */
+ * and return -1.
+ * To discard buffered data and return 0 from proto_recv, the callback
+ * should return 0. This is how the callback requests an orderly close.
+ */
 void proto_set_on_input(struct proto *p,
 	int (*on_input)(struct proto *p, unsigned char msg,
 			 const char *data, unsigned int datalen));
@@ -73,8 +78,12 @@ void proto_set_on_input(struct proto *p,
 __attribute__((format(printf, 2, 3)))
 int proto_output(struct proto *p, const char *fmt, ...);
 /* Sets the upcall for delivering a PDU to the network.
+ * In PROTO_MODE_FRAMED, the iovs contain a single PDU,
+ * whose framing must be preserved by the upcall.
+ * The iovs passed to the upcall will never be empty.
+ * The upcall should return 0 or >0 on success.
  * The upcall must return -1 if it was unable to transmit or
- * buffer the entire PDU. */
+ * to buffer the entire PDU, and set errno accordingly. */
 void proto_set_on_sendv(struct proto *p,
     int (*on_sendv)(struct proto *p, const struct iovec *iovs, int niovs));
 
@@ -87,5 +96,6 @@ void proto_set_on_error(struct proto *p,
 #define PROTO_MODE_UNKNOWN	0	/* still auto-detecting */
 #define PROTO_MODE_BINARY	1	/* TLV */
 #define PROTO_MODE_TEXT		2	/* telnet ascii */
+#define PROTO_MODE_FRAMED	3	/* TV */
 int proto_set_mode(struct proto *p, int mode);
 int proto_get_mode(struct proto *p);

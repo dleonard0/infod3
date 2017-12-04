@@ -31,6 +31,7 @@ static struct {
 
 	/* What mock_on_input_fn() should return when called */
 	int retval;
+	int reterrno;
 } mock_on_input;
 
 static struct {
@@ -135,12 +136,25 @@ mock_on_input_fn(struct proto *p, unsigned char msg,
 	memcpy(mock_on_input.data, data, datalen);
 
 #if DEBUG
-	dprintf("mock_on_input_fn(p=%p, msg=%s, datalen=%u) #%u\n",
-		p, msg_str(msg), datalen, mock_on_input.counter);
+	dprintf("mock_on_input_fn(p=%p, msg=%s, datalen=%u) -> %d %s #%u\n",
+		p, msg_str(msg), datalen, mock_on_input.retval,
+		mock_on_input.retval == -1
+			? strerror(mock_on_input.reterrno)
+			: "",
+		mock_on_input.counter);
 	if (datalen)
 		fprinthex(stderr, "data", data, datalen);
 #endif
+	if (mock_on_input.retval == -1)
+		errno = mock_on_input.reterrno;
 	return mock_on_input.retval;
+}
+
+static void
+mock_on_input_clear()
+{
+	mock_on_input.p = NULL;
+	mock_on_input.counter = 0;
 }
 
 static void
@@ -188,8 +202,8 @@ assert_mock_on_input(int line, const char *call, struct proto *p,
 			mock_on_input.datalen, s, slen);
 		abort();
 	}
-	/* Clear the mock_on_input structure after asserting */
-	memset(&mock_on_input, 0, sizeof mock_on_input);
+	/* Clear the mock_on_input counter after asserting */
+	mock_on_input.counter = 0;
 }
 #define assert_mock_on_input(p, msg, s) \
 	assert_mock_on_input(__LINE__, \
@@ -271,9 +285,9 @@ assert_mock_on_sendv(int line, const char *call, struct proto *p,
 			mock_on_sendv.datalen, s, slen);
 		abort();
 	}
-	/* Clear the mock_on_sendv structure after asserting */
-	memset(&mock_on_sendv, 0, sizeof mock_on_sendv);
-
+	/* Clear the mock_on_sendv counter after asserting */
+	mock_on_sendv.counter = 0;
+	mock_on_sendv.datalen = 0;
 }
 #define assert_mock_on_sendv(p, data) \
 	assert_mock_on_sendv(__LINE__, \
@@ -281,6 +295,14 @@ assert_mock_on_sendv(int line, const char *call, struct proto *p,
 		p, data, sizeof data - 1)
 #define assert_no_mock_on_sendv() \
 	assert(mock_on_sendv.counter == 0)
+
+static void
+mock_on_sendv_clear()
+{
+	mock_on_sendv.p = NULL;
+	mock_on_sendv.counter = 0;
+	mock_on_sendv.datalen = 0;
+}
 
 
 static struct {
@@ -310,7 +332,7 @@ assert_mock_udata_free(int line, const char *call, void *udata)
 			__FILE__, line, call, udata, mock_udata_free.udata);
 		abort();
 	}
-	memset(&mock_udata_free, 0, sizeof mock_udata_free);
+	mock_udata_free.counter = 0;
 }
 #define assert_mock_udata_free(udata) \
 	assert_mock_udata_free(__LINE__, \
@@ -364,6 +386,17 @@ assert_mock_on_error_called(int line, const char *call, struct proto *p)
 	assert_mock_on_error_called(__LINE__, \
 		"assert_mock_on_error_called(" #p ")", p)
 
+static void
+mock_clear()
+{
+	mock_on_sendv_clear();
+	mock_on_input_clear();
+	mock_on_error_clear();
+}
+
+#define MEGA_SIZE 0x10000 /* too big to send */
+static char Mega[MEGA_SIZE];
+
 /* -- binary protocol tests -- */
 
 static void
@@ -374,55 +407,56 @@ test_binary_proto()
 	p = proto_new();
 
 	/* Prepare to capture callbacks */
-	mock_on_error_clear();
-	proto_set_on_error(p, mock_on_error_fn);
+	mock_clear();
 	proto_set_on_input(p, mock_on_input_fn);
+	proto_set_on_sendv(p, mock_on_sendv_fn);
+	proto_set_on_error(p, mock_on_error_fn);
+	mock_on_input.retval = 1;
 
 	/* Initially the protocol mode is unknown */
 	assert(proto_get_mode(p) == PROTO_MODE_UNKNOWN);
 
 	/* Auto-detect on the first hello message */
-	assert(proto_recv(p, "\x00\0\6\3Hello", 9) == 9);
+	assert(proto_recv(p, "\x00\0\6\3Hello", 9) > 0);
 	assert(proto_get_mode(p) == PROTO_MODE_BINARY);
 	assert_mock_on_input(p, CMD_HELLO, "\3Hello");
 
 	/* Exercise receiving all of the message types [from net] */
-	assert(proto_recv(p, "\x00\0\1\3", 4) == 4);
+	assert(proto_recv(p, "\x00\0\1\3", 4) > 0);
 	assert_mock_on_input(p, CMD_HELLO, "\3");
-	assert(proto_recv(p, "\x01\0\4test", 7) == 7);
+	assert(proto_recv(p, "\x01\0\4test", 7) > 0);
 	assert_mock_on_input(p, CMD_SUB, "test");
-	assert(proto_recv(p, "\x02\0\4yeah", 7) == 7);
+	assert(proto_recv(p, "\x02\0\4yeah", 7) > 0);
 	assert_mock_on_input(p, CMD_UNSUB, "yeah");
-	assert(proto_recv(p, "\x03\0\3key", 6) == 6);
+	assert(proto_recv(p, "\x03\0\3key", 6) > 0);
 	assert_mock_on_input(p, CMD_GET, "key");
-	assert(proto_recv(p, "\x04\0\3key", 6) == 6);
+	assert(proto_recv(p, "\x04\0\3key", 6) > 0);
 	assert_mock_on_input(p, CMD_PUT, "key");
-	assert(proto_recv(p, "\x04\0\013key\0val\0nul", 14) == 14);
+	assert(proto_recv(p, "\x04\0\013key\0val\0nul", 14) > 0);
 	assert_mock_on_input(p, CMD_PUT, "key\0val\0nul");
-	assert(proto_recv(p, "\x05\0\0", 3) == 3);
+	assert(proto_recv(p, "\x05\0\0", 3) > 0);
 	assert_mock_on_input(p, CMD_BEGIN, "");
-	assert(proto_recv(p, "\x06\0\0", 3) == 3);
+	assert(proto_recv(p, "\x06\0\0", 3) > 0);
 	assert_mock_on_input(p, CMD_COMMIT, "");
-	assert(proto_recv(p, "\x07\0\0", 3) == 3);
+	assert(proto_recv(p, "\x07\0\0", 3) > 0);
 	assert_mock_on_input(p, CMD_PING, "");
-	assert(proto_recv(p, "\x07\0\1x", 4) == 4);
+	assert(proto_recv(p, "\x07\0\1x", 4) > 0);
 	assert_mock_on_input(p, CMD_PING, "x");
 
-	assert(proto_recv(p, "\x80\0\4\3foo", 7) == 7);
+	assert(proto_recv(p, "\x80\0\4\3foo", 7) > 0);
 	assert_mock_on_input(p, MSG_VERSION, "\3foo");
-	assert(proto_recv(p, "\x81\0\3key", 6) == 6);
+	assert(proto_recv(p, "\x81\0\3key", 6) > 0);
 	assert_mock_on_input(p, MSG_INFO, "key");
-	assert(proto_recv(p, "\x81\0\013key\0val\0nul", 14) == 14);
+	assert(proto_recv(p, "\x81\0\013key\0val\0nul", 14) > 0);
 	assert_mock_on_input(p, MSG_INFO, "key\0val\0nul");
-	assert(proto_recv(p, "\x82\0\0", 3) == 3);
+	assert(proto_recv(p, "\x82\0\0", 3) > 0);
 	assert_mock_on_input(p, MSG_PONG, "");
-	assert(proto_recv(p, "\x82\0\1x", 4) == 4);
+	assert(proto_recv(p, "\x82\0\1x", 4) > 0);
 	assert_mock_on_input(p, MSG_PONG, "x");
-	assert(proto_recv(p, "\x83\0\5error", 8) == 8);
+	assert(proto_recv(p, "\x83\0\5error", 8) > 0);
 	assert_mock_on_input(p, MSG_ERROR, "error");
 
 	/* Exercise sending all of the message types [to net] */
-	proto_set_on_sendv(p, mock_on_sendv_fn);
 	assert(proto_output(p, "%c %c %s", CMD_HELLO, 0, "hello") != -1);
 	assert_mock_on_sendv(p, "\x00\0\6\0hello");
 	assert(proto_output(p, "%c %c", CMD_HELLO, 0) != -1);
@@ -492,6 +526,19 @@ test_binary_proto()
 	assert_no_mock_on_sendv();
 	mock_on_error_clear();
 
+	/* Test returning an unrecoverable error from on_input() */
+	mock_on_input.retval = -1;
+	mock_on_input.reterrno = ENODEV;
+	errno = 0;
+	assert(proto_recv(p, "\x00\0\6\3Hello", 9) == -1);
+	assert(errno == ENODEV);
+
+	/* Test returning a close indicator */
+	mock_on_input.retval = 0;
+	assert(proto_recv(p, "", 0) == 0);
+	assert(mock_on_input.counter);
+	assert(mock_on_input.datalen == 0);
+
 	proto_free(p);
 }
 
@@ -504,14 +551,17 @@ test_text_proto()
 
 	p = proto_new();
 
+	mock_clear();
+	proto_set_on_input(p, mock_on_input_fn);
+	proto_set_on_sendv(p, mock_on_sendv_fn);
+	proto_set_on_error(p, mock_on_error_fn);
+	mock_on_input.retval = 1;
+
 	/* Initially the protocol mode is unknown */
 	assert(proto_get_mode(p) == PROTO_MODE_UNKNOWN);
 
-	/* Prepare capturing on_input() callbacks */
-	proto_set_on_input(p, mock_on_input_fn);
-
 #define assert_proto_recv(p, s) \
-	assert(proto_recv(p, s, sizeof s - 1) == sizeof s - 1)
+	assert(proto_recv(p, s, sizeof s - 1) > 0)
 
 	/* Recieving a text message auto-detects text mode */
 	assert_proto_recv(p, "hello 0\n");
@@ -549,7 +599,6 @@ test_text_proto()
 	/* Exercise encoding in text [to net].
 	 * (This relies on the proto receiving one text message
 	 * earlier, otherwise it would be in binary mode) */
-	proto_set_on_sendv(p, mock_on_sendv_fn);
 	assert(proto_output(p, "%c %c %s", CMD_HELLO, 0, "hello") != -1);
 	assert_mock_on_sendv(p, "HELLO 0 hello\r\n");
 
@@ -656,6 +705,15 @@ test_text_proto()
 	assert(proto_output(p, "%c %s", MSG_ERROR, "abcd") != -1);
 	assert_mock_on_sendv(p, "ERROR abcd\r\n");
 
+	/* Test sending the largest string possible */
+	assert(sizeof Mega >= 0xffff);
+	assert(proto_output(p, "%c %*s", MSG_ERROR, 0xffff, Mega) != -1);
+	assert(mock_on_sendv.counter > 0);
+	assert(mock_on_sendv.datalen ==
+		strlen("ERROR ") + 0xffff + strlen("\r\n"));
+	assert(memcmp(mock_on_sendv.data + strlen("ERROR "), Mega, 0xffff) == 0);
+	mock_on_sendv_clear();
+
 	/* Exercise some malformed formats [to net] */
 	assert(proto_output(p, " ") == -1);
 	assert_no_mock_on_sendv();
@@ -666,12 +724,75 @@ test_text_proto()
 	assert(proto_output(p, "x") == -1);
 	assert_no_mock_on_sendv();
 
-	char mega[65536 + 1]; /* too big */
-	memset(mega, 'M', sizeof mega);
-	assert(proto_output(p, "%*s", (int)sizeof mega, mega) == -1);
+	assert(proto_output(p, "%*s", MEGA_SIZE, Mega) == -1);
 	assert_no_mock_on_sendv();
-	assert(proto_output(p, "%c %*s", 1, (int)sizeof mega, mega) == -1);
+	assert(proto_output(p, "%c %*s", 1, MEGA_SIZE, Mega) == -1);
 	assert_no_mock_on_sendv();
+
+	/* Test returning an unrecoverable error from on_input() */
+	mock_on_input.retval = -1;
+	mock_on_input.reterrno = ENODEV;
+	errno = 0;
+	assert(proto_recv(p, "hello 0\r", 9) == -1);
+	assert(errno == ENODEV);
+
+	/* Test returning a close indicator */
+	mock_on_input.retval = 0;
+	assert(proto_recv(p, "", 0) == 0);
+	assert(mock_on_input.counter);
+	assert(mock_on_input.datalen == 0);
+
+	proto_free(p);
+}
+
+static void
+test_framed_proto()
+{
+	struct proto *p;
+
+	p = proto_new();
+
+	mock_clear();
+	proto_set_on_input(p, mock_on_input_fn);
+	proto_set_on_sendv(p, mock_on_sendv_fn);
+	proto_set_on_error(p, mock_on_error_fn);
+	mock_on_input.retval = 1;
+
+	assert(proto_set_mode(p, PROTO_MODE_FRAMED) != -1);
+
+	assert_proto_recv(p, "\x00\x00");
+	assert(proto_get_mode(p) == PROTO_MODE_FRAMED);
+	assert_mock_on_input(p, CMD_HELLO, "\0");
+
+	assert(proto_output(p, "%c %c %s", CMD_HELLO, 0, "hello") != -1);
+	assert_mock_on_sendv(p, "\x00\0hello");
+
+	/* Test sending and receiving the largest units */
+	assert(proto_output(p, "%c %*s", MSG_ERROR, 0xffff, Mega) != -1);
+	assert(mock_on_sendv.counter > 0);
+	assert(mock_on_sendv.datalen == 1 + 0xffff);
+	assert(memcmp(mock_on_sendv.data + 1, Mega, 0xffff) == 0);
+	mock_on_sendv_clear();
+
+	assert(proto_recv(p, Mega, 1 + 0xffff) > 0);
+	assert(mock_on_input.counter == 1);
+	assert(mock_on_input.msg == 'M'); /* XXX only works because of frame */
+	assert(mock_on_input.datalen == 0xffff);
+	assert(memcmp(mock_on_input.data, Mega, 0xffff) == 0);
+	mock_on_input_clear();
+
+	/* Test returning an unrecoverable error from on_input() */
+	mock_on_input.retval = -1;
+	mock_on_input.reterrno = ENODEV;
+	errno = 0;
+	assert(proto_recv(p, "\0\0", 9) == -1);
+	assert(errno == ENODEV);
+
+	/* Test returning a close indicator */
+	mock_on_input.retval = 0;
+	assert(proto_recv(p, "", 0) == 0);
+	assert(mock_on_input.counter);
+	assert(mock_on_input.datalen == 0);
 
 	proto_free(p);
 }
@@ -682,6 +803,8 @@ main()
 	struct proto *p;
 	static char udata0[] = "udata0";
 	static char udata1[] = "udata1";
+
+	memset(Mega, 'M', sizeof Mega);
 
 	/* Can allocate and destroy */
 	p = proto_new();
@@ -708,6 +831,7 @@ main()
 
 	test_binary_proto();
 	test_text_proto();
+	test_framed_proto();
 
 	dprintf("%s:%d: %s\n", __FILE__, __LINE__, PASSED);
 }

@@ -261,6 +261,13 @@ static int
 proto_recv_binary(struct proto *p, const char *net, unsigned int netlen)
 {
 	int ret = 0;
+
+	if (!netlen) {
+		if (p->on_input)
+			ret =p->on_input(p, MSG_EOF, NULL, 0);
+		return ret;
+	}
+
 	while (netlen) {
 		unsigned int take;
 		uint16_t sz = binary_pkt_len(&p->rx);
@@ -286,10 +293,11 @@ proto_recv_binary(struct proto *p, const char *net, unsigned int netlen)
 		    p->rx.len == 3 + (sz = binary_pkt_len(&p->rx)))
 		{
 			if (p->on_input) {
-				int ret = p->on_input(p, p->rx.buf[0] & 0xff,
+				int n = p->on_input(p, p->rx.buf[0] & 0xff,
 					p->rx.buf + 3, sz);
-				if (ret == -1)
-					return -1;
+				if (n <= 0)
+					return n;
+				ret += n;
 			}
 			if (rxbuf_clear(&p->rx, 3) == -1)
 				return -1;
@@ -298,6 +306,17 @@ proto_recv_binary(struct proto *p, const char *net, unsigned int netlen)
 	return ret;
 }
 
+/* -- framed decode -- */
+
+static int
+proto_recv_framed(struct proto *p, const char *net, unsigned int netlen)
+{
+	if (!p->on_input)
+		return netlen;
+	if (!netlen)
+		return p->on_input(p, MSG_EOF, NULL, 0);
+	return p->on_input(p, *net, net + 1, netlen - 1);
+}
 
 /* -- text decode -- */
 
@@ -322,7 +341,9 @@ static struct {
 	{}
 };
 
-/* Decode one byte from the text protocol */
+/* Decode one byte from the text protocol.
+ * Returns -1 on unrecoverable errors.
+ * Returns 1 on good data and on protocol errors. */
 static int
 proto_recv_text_1ch(struct proto *p, char ch)
 {
@@ -393,8 +414,8 @@ again:
 				/* pass up full input command */
 				int ret = p->on_input(p, p->rx.buf[0] & 0xff,
 					&p->rx.buf[1], p->rx.len - 1);
-				if (ret == -1)
-					return -1;
+				if (ret <= 0)
+					return ret;
 			}
 			t->state = T_BOL;
 		} else if (!*t->fmt) {
@@ -483,18 +504,30 @@ again:
 		}
 		break;
 	}
-	return 0;
+	return 1;
 }
 
 static int
 proto_recv_text(struct proto *p, const char *net, unsigned int netlen)
 {
 	unsigned int i;
+	int ret = 0;
 
-	for (i = 0; i < netlen; i++)
-		if (proto_recv_text_1ch(p, net[i]) == -1)
+	if (!netlen) {
+		if (proto_recv_text_1ch(p, '\n') == -1)
 			return -1;
-	return netlen;
+		if (p->on_input)
+			ret = p->on_input(p, MSG_EOF, NULL, 0);
+		return ret;
+	}
+
+	for (i = 0; i < netlen; i++) {
+		int n = proto_recv_text_1ch(p, net[i]);
+		if (n <= 0)
+			return n;
+		ret += n;
+	}
+	return ret;
 }
 
 
@@ -518,10 +551,17 @@ proto_recv(struct proto *p, const void *netv, unsigned int netlen)
 			p->mode = PROTO_MODE_TEXT;
 	}
 
-	if (p->mode == PROTO_MODE_BINARY)
+	switch (p->mode) {
+	case PROTO_MODE_BINARY:
 		return proto_recv_binary(p, net, netlen);
-	else
+	case PROTO_MODE_TEXT:
 		return proto_recv_text(p, net, netlen);
+	case PROTO_MODE_FRAMED:
+		return proto_recv_framed(p, net, netlen);
+	default:
+		errno = EINVAL; /* bad mode */
+		return -1;
+	}
 }
 
 /* -- text encode -- */
@@ -770,8 +810,9 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 			    !*fmt &&
 			    (nulpos = memchr(str, 0, len)))
 			{
-				if (proto_send_text_string(p, str, nulpos - str)
-					== -1) return -1;
+				if (proto_send_text_string(p, str,
+				    nulpos - str) == -1)
+					return -1;
 				if (proto_outbuf_putc(p, ' ') == -1)
 					return -1;
 				len -= (nulpos + 1) - str;
@@ -857,7 +898,7 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 				errno = ENOMEM;
 				return -1; /* too many %c */
 			}
-			buf[buflen] = va_arg(ap, int) & 0xff; /* promoted char */
+			buf[buflen] = va_arg(ap, int) & 0xff; /* promoted */
 			iov->iov_base = &buf[buflen];
 			if (iov == iov_start) {
 				/* Reserve space for the length bytes */
@@ -895,7 +936,6 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 	return iov - iov_start;
 }
 
-
 static int
 proto_output_binary(struct proto *p, const char *fmt, va_list ap)
 {
@@ -903,6 +943,21 @@ proto_output_binary(struct proto *p, const char *fmt, va_list ap)
 	int niov = to_binary_iov(p, iov, 10, fmt, ap);
 	if (niov < 0)
 		return -1;
+	if (p->on_sendv)
+		return p->on_sendv(p, iov, niov);
+	return 0;
+}
+
+static int
+proto_output_framed(struct proto *p, const char *fmt, va_list ap)
+{
+	struct iovec iov[10];
+	int niov = to_binary_iov(p, iov, 10, fmt, ap);
+	if (niov < 0)
+		return -1;
+	/* Framed is just like binary except that we omit the
+	 * two length bytes. We do that by patching iov[0] */
+	iov[0].iov_len = 1;
 	if (p->on_sendv)
 		return p->on_sendv(p, iov, niov);
 	return 0;
@@ -918,10 +973,19 @@ proto_output(struct proto *p, const char *fmt, ...)
 		p->mode = PROTO_MODE_BINARY; /* prefer binary */
 
 	va_start(ap, fmt);
-	if (p->mode == PROTO_MODE_BINARY)
+	switch (p->mode) {
+	case  PROTO_MODE_BINARY:
 		ret = proto_output_binary(p, fmt, ap);
-	else
+		break;
+	case PROTO_MODE_TEXT:
 		ret = proto_output_text(p, fmt, ap);
+		break;
+	case PROTO_MODE_FRAMED:
+		ret = proto_output_framed(p, fmt, ap);
+		break;
+	default:
+		ret = binary_output_error(p, EINVAL, "bad mode %d", p->mode);
+	}
 	va_end(ap);
 	return ret;
 }
