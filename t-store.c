@@ -43,7 +43,7 @@ test_store(struct store *store, struct info **sorted_info,
 		char keybuf[1024];
 		unsigned int orig_refcnt = (*i)->refcnt;
 
-		strncpy(keybuf, (*i)->keydata, sizeof keybuf);
+		strncpy(keybuf, (*i)->keyvalue, sizeof keybuf);
 		keybuf[sizeof keybuf - 1] = '\0';
 		found = store_get(store, keybuf);
 		if (found != *i) fprintf(stderr, "keybuf = \"%s\"\n", keybuf);
@@ -58,7 +58,7 @@ test_store(struct store *store, struct info **sorted_info,
 	assert(index);
 	for (i = sorted_info; *i; i++) {
 		found = index_next(index);
-		if (found != *i) fprintf(stderr, "i = \"%s\"\n", (*i)->keydata);
+		if (found != *i) fprintf(stderr, "i = \"%s\"\n", (*i)->keyvalue);
 		assert(found);
 		assert(found == *i);
 		info_decref(found);
@@ -75,7 +75,7 @@ test_store(struct store *store, struct info **sorted_info,
 }
 
 static void
-test_index_changing(struct store *store, const char *keydata, uint16_t sz)
+test_index_changing(struct store *store, const char *keyvalue, uint16_t sz)
 {
 	struct info *insert;
 	struct index *index;
@@ -86,7 +86,7 @@ test_index_changing(struct store *store, const char *keydata, uint16_t sz)
 
 	insert = info_new(sz);
 	assert(insert);
-	memcpy(insert->keydata, keydata, sz);
+	memcpy(insert->keyvalue, keyvalue, sz);
 
 	/* can index over the whole store */
 	index = index_open(store);
@@ -111,13 +111,13 @@ test_index_changing(struct store *store, const char *keydata, uint16_t sz)
 		 * will be different because we will sometimes insert before
 		 * the moving index pointer and the insert will be
 		 * invisible to the index. */
-		if (i && strcmp(insert->keydata, content[i-1]->keydata) < 0)
+		if (i && strcmp(insert->keyvalue, content[i-1]->keyvalue) < 0)
 			expected = n;
 		else
 			expected = n + 1;
 
 		last = NULL;
-		dprintf("+<%s> i=%u e=%u [ ", insert->keydata, i, expected);
+		dprintf("+<%s> i=%u e=%u [ ", insert->keyvalue, i, expected);
 		for (j = 0; ; j++) {
 			if (j == i) {
 				dprintf("+ ");
@@ -127,12 +127,12 @@ test_index_changing(struct store *store, const char *keydata, uint16_t sz)
 			info = index_next(index);
 			if (!info)
 				break;
-			dprintf("<%s> ", info->keydata);
+			dprintf("<%s> ", info->keyvalue);
 			if (last) {
-				if (strcmp(last->keydata, info->keydata) >= 0)
+				if (strcmp(last->keyvalue, info->keyvalue) >= 0)
 					fprintf(stderr, "last=%s info=%s\n",
-						last->keydata, info->keydata);
-				assert(strcmp(last->keydata, info->keydata)<0);
+						last->keyvalue, info->keyvalue);
+				assert(strcmp(last->keyvalue, info->keyvalue)<0);
 			}
 			info_decref(last);
 			last = info;
@@ -154,7 +154,7 @@ test_index_changing(struct store *store, const char *keydata, uint16_t sz)
 		 * just before the ith index_next(). The delete will be
 		 * invisible if insert would occupy the ith or earlier
 		 * position. */
-		if (i && strcmp(insert->keydata, content[i-1]->keydata) < 0)
+		if (i && strcmp(insert->keyvalue, content[i-1]->keyvalue) < 0)
 			expected = n + 1;
 		else
 			expected = n;
@@ -162,7 +162,7 @@ test_index_changing(struct store *store, const char *keydata, uint16_t sz)
 		index = index_open(store);
 		assert(index);
 		last = NULL;
-		dprintf("-<%s> i=%u e=%u [ ", insert->keydata, i, expected);
+		dprintf("-<%s> i=%u e=%u [ ", insert->keyvalue, i, expected);
 		for (j = 0; ; j++) {
 			if (j == i) {
 				dprintf("- ");
@@ -171,12 +171,12 @@ test_index_changing(struct store *store, const char *keydata, uint16_t sz)
 			info = index_next(index);
 			if (!info)
 				break;
-			dprintf("<%s> ", info->keydata);
+			dprintf("<%s> ", info->keyvalue);
 			if (last) {
-				if (strcmp(last->keydata, info->keydata) >= 0)
+				if (strcmp(last->keyvalue, info->keyvalue) >= 0)
 					fprintf(stderr, "last=%s info=%s\n",
-						last->keydata, info->keydata);
-				assert(strcmp(last->keydata, info->keydata)<0);
+						last->keyvalue, info->keyvalue);
+				assert(strcmp(last->keyvalue, info->keyvalue)<0);
 			}
 			info_decref(last);
 			last = info;
@@ -209,9 +209,9 @@ main()
 	struct info *info0;
 	struct info *info1;
 	struct info *info2;
-	static const char keydata0[] = "key0\0data0";
-	static const char keydata1[] = "key1\0data1";
-	static const char keydata2[] = "key2\0data2";
+	static const char keyvalue0[] = "key0\0data0";
+	static const char keyvalue1[] = "key1\0data1";
+	static const char keyvalue2[] = "key2\0data2";
 	unsigned int i;
 
     /* -- empty store -- */
@@ -227,9 +227,9 @@ main()
     /* -- single-entry store tests -- */
 
 	/* can allocate the key-value <"key1","value1"> */
-	info1 = info_new(sizeof keydata1);
+	info1 = info_new(sizeof keyvalue1);
 	assert(info1);
-	memcpy(info1->keydata, keydata1, sizeof keydata1);
+	memcpy(info1->keyvalue, keyvalue1, sizeof keyvalue1);
 	assert(info1->refcnt == 1);
 
 	/* can store it */
@@ -243,9 +243,9 @@ main()
     /* -- a store with 2 entries -- */
 
 	/* can allocate <key2,value2> */
-	info2 = info_new(sizeof keydata2);
+	info2 = info_new(sizeof keyvalue2);
 	assert(info2);
-	memcpy(info2->keydata, keydata2, sizeof keydata2);
+	memcpy(info2->keyvalue, keyvalue2, sizeof keyvalue2);
 	assert(info2->refcnt == 1);
 
 	/* can store it */
@@ -258,9 +258,9 @@ main()
 
     /* -- a store with 3 entries -- */
 
-	info0 = info_new(sizeof keydata0);
+	info0 = info_new(sizeof keyvalue0);
 	assert(info0);
-	memcpy(info0->keydata, keydata0, sizeof keydata0);
+	memcpy(info0->keyvalue, keyvalue0, sizeof keyvalue0);
 
 	assert(store_put(store, info0) == 0);
 	assert(info0->refcnt == 1);
@@ -314,7 +314,7 @@ main()
 
 		/* construct a replacement, with same key, different data */
 		repl = info_new(5); /* enough room for "keyX\0" */
-		memcpy(repl->keydata, key, 5);
+		memcpy(repl->keyvalue, key, 5);
 
 		/* store the replacement, it replaces the original in-store */
 		assert(store_put(store, repl) == 0);

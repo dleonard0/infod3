@@ -72,7 +72,7 @@ store_find(const struct store *store, const char *key)
 	a = 0;
 	b = store->n;
 	while ((m = (a + b) / 2) > a) {
-		int cmp = strcmp(key, list[m]->keydata);
+		int cmp = strcmp(key, list[m]->keyvalue);
 		if (cmp == 0)
 			break;
 		else if (cmp < 0)
@@ -80,7 +80,7 @@ store_find(const struct store *store, const char *key)
 		else
 			a = m + 1;
 	}
-	if (m < b && strcmp(key, list[m]->keydata) > 0)
+	if (m < b && strcmp(key, list[m]->keyvalue) > 0)
 		m++;
 	return m;
 }
@@ -109,14 +109,14 @@ store_insert(struct store *store, unsigned int i)
 static int
 store_eq(const struct store *store, unsigned int i, const char *key)
 {
-	return i < store->n && strcmp(key, store->info[i]->keydata) == 0;
+	return i < store->n && strcmp(key, store->info[i]->keyvalue) == 0;
 }
 
 int
 store_put(struct store *store, struct info *info)
 {
-	unsigned int i = store_find(store, info->keydata);
-	if (store_eq(store, i, info->keydata)) {
+	unsigned int i = store_find(store, info->keyvalue);
+	if (store_eq(store, i, info->keyvalue)) {
 		/* Found existing identical key; replace it */
 		info_decref(store->info[i]);
 	} else {
@@ -135,7 +135,7 @@ store_del(struct store *store, struct info *info)
 	unsigned int i;
 	if (!info)
 		return;
-	i = store_find(store, info->keydata);
+	i = store_find(store, info->keyvalue);
 	if (i < store->n && store->info[i] == info) {
 		info_decref(store->info[i]);
 		--store->n;
@@ -240,8 +240,8 @@ index_next(struct index *index)
 	} else {
 		/* Something has changed under us.
 		 * Seek to one step after the previously returned key */
-		i = store_find(index->store, prev->keydata);
-		if (store_eq(store, i, prev->keydata))
+		i = store_find(index->store, prev->keyvalue);
+		if (store_eq(store, i, prev->keyvalue))
 			i++;
 		info = i < n ? store->info[i] : NULL;
 	}

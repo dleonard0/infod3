@@ -23,7 +23,7 @@ struct store;
 struct info {
 	uint16_t sz;				/* total size of key\0value */
 	uint16_t refcnt;
-	char keydata[];				/* key\0value */
+	char keyvalue[];			/* key\0value */
 };
 struct info *info_new(uint16_t sz);		/* Initial refcnt is 1 */
 void info_decref(struct info *info);
