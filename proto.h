@@ -2,21 +2,54 @@
 
 /*
  * infod3 network protocol translator.
- *                     ___
- *         <- on_send |   | <-- output
- *  network           |   |               application
- *         -> recv    |___| --> on_input
  *
- * The protocol will auto-select its mode (binary or text) from the first
- * send or recv from the network. If it sends first, it will prefer binary.
+ * SUMMARY
  *
- * Application input is always in the pair form of <cmd,data>.
- * Application output uses a printf-like interface where the first %c
- * format corresponds to the message ID.
+ * The protocol translator provides two interfaces (proto_recv, proto_output)
+ * and is configured with two event callbacks (on_input, on_send).
+ *                         ___
+ *          => proto_recv |   | => on_input
+ *  network               |   |                  application
+ *          <= on_send    |___| <= proto_output
+ *
+ * The protocol auto-selects the network mode (binary or text) from the first
+ * send or recv from the network. If a sends happens first, it will prefer
+ * to talk binary.
+ *
+ * An application's on_input() callback always recieves a PDU as a <cmd,data[]>
+ * pair. The application sends PDUs using a printf-like interface where the
+ * first %c format provides the cmd ID, and following %-formats encode
+ * the data[].
+ *
+ * On the network side, the interfaces proto_recv() and on_send() use
+ * char[] and iovec[], intended to match up with read() and writev().
+ *
+ *
+ * Input/from-net path:
+ *
+ * (start)                         _____                                  __
+ *  -> char[]       ->.           |     | ->  MSG_*, char[]  ->.         |  |
+ *                     proto_recv()     |                       on_input()  |
+ *  <-  { 1+ ok     <-'           |     | <-  { 1+ ok        <-'         |__|
+ *      { 0  ok/close             |_____|     { 0  ok/close
+ *      {-1  error/close            \         {-1  error/close
+ *                                   v
+ *                               MSG_ERROR (protocol error)
+ * Output/to-net path:               |
+ *        __                       _/___                                (start)
+ *       |  |       .<-  iov[] <- |     |            .<- "%c %*s",MSG_*,... <-
+ *       |  on_sendv()            |     proto_output()
+ *       |__|       `-> 0+ ok  -> |     |            `-> 0+ ok              ->
+ *                     -1  error  |_____|               -1  error
+ *
  */
+struct proto;
 
-/* Message IDs. Clients send CMDs, servers send MSGs.
- * The protocol object can send and receive either. */
+/*
+ * Message and command IDs.
+ * Client applications send CMDs, and server applications send MSGs.
+ * (These could have been called 'request' and 'reply', but they weren't.)
+ */
 
 #define CMD_HELLO		0x00	/* %c<id> [%s<text>] */
 #define CMD_SUB			0x01	/* %s<pattern> */
@@ -36,54 +69,70 @@
 #define MSG_PONG		0x82	/* "[%s]", [id] */
 #define MSG_ERROR		0x83	/* "%s" */
 
-#define MSG_EOF			0xff	/* pseudo-message indicating close */
-
-struct proto;
-struct iovec;
+#define MSG_EOF			0xff	/* pseudo-message indicating close
+                                         * i.e. proto_recv(netlen=0) */
 
 struct proto *proto_new(void);
 void proto_free(struct proto *p);
 
 /* Stores an application pointer (udata) in the protocol.
- * If the proto is freed, or the udata is altered,
- * the optional ufree function will be called on the current udata. */
+ * If the proto is freed, or if the udata is set again later,
+ * the optional ufree function will be called on the old udata. */
 void proto_set_udata(struct proto *p, void *udata, void (*ufree)(void *));
 void *proto_get_udata(struct proto *p);
 
-/* Passs network-received pdu to the protocol.
- * A partial PDU may be received, except in PROTO_MODE_FRAMED, where
- * the PDUs must be recv'd completely and independently.
- * Returns -1 on an unrecoverable error (eg ENOMEM). */
+/* proto_recv():
+ *  Receive a PDU or partial PDU from the network.
+ *  Parameters net,netlen describe the binary data received.
+ *  Pass a netlen of 0 to indicate the peer closed the connection.
+ *  Returns -1 on unrecoverable protocol error (eg ENOMEM).
+ *  Returns 0 or -1 to indicate the connection should be closed.
+ */
 int proto_recv(struct proto *p, const void *net, unsigned int netlen);
+
 /* Sets the callback for received decoded messages.
- * At close, the callback will receive MSG_EOF.
- * On unrecoverable errors, the callback function should set errno
- * and return -1.
- * To discard buffered data and return 0 from proto_recv, the callback
- * should return 0. This is how the callback requests an orderly close.
+ *
+ * on_input():
+ *  The <msg,data> parameters hold the received message from the network.
+ *  MSG_EOF indicates the peer closed the connection, and on_input
+ *  should return 0.
+ *  Return -1 for unrecoverable errors, and set errno.
+ *  Return 1 to indicate the message was serviced. It is permissible
+ *  for on_input() to call proto_output().
+ *  Return 0 to indicate an immediate close. Any pending messages will be lost.
  */
 void proto_set_on_input(struct proto *p,
 	int (*on_input)(struct proto *p, unsigned char msg,
 			 const char *data, unsigned int datalen));
 
-/* Encode and send a protocol message.
- * The format string only understands the following:
- *  %c   - byte (unsigned)
- *  %s   - NUL-terminated string (but no NUL is emitted)
- *  %*s  - size_t, binary data
- *  space chars are ignored
- * No other formats or literal characters are permitted.
- * The first format must be %c with the message/command ID.
- * Returns 0 on success, or -1 on error (EINVAL, ENOMEM). */
+/* proto_output():
+ *  Encode and send a PDU.
+ *  The fmt argument is similat to printf but only understands the
+ *  following formats:
+ *     %c    - byte (unsigned)
+ *     %s    - NUL-terminated string (but no NUL is emitted)
+ *     %*s   - size_t, binary data
+ *     " "   - space characters (\040) are ignored
+ *  No other formats or literal characters are permitted, and
+ *  will result in EINVAL.
+ *  The first format in fmt must be "%c" and supplies the
+ *  message/command ID.
+ *  Returns 0+ on success.
+ *  Returns -1 on error (EINVAL, ENOMEM).
+ */
 __attribute__((format(printf, 2, 3)))
 int proto_output(struct proto *p, const char *fmt, ...);
+
+struct iovec;
+
 /* Sets the upcall for delivering a PDU to the network.
- * In PROTO_MODE_FRAMED, the iovs contain a single PDU,
- * whose framing must be preserved by the upcall.
- * The iovs passed to the upcall will never be empty.
- * The upcall should return 0 or >0 on success.
- * The upcall must return -1 if it was unable to transmit or
- * to buffer the entire PDU, and set errno accordingly. */
+ *
+ * on_sendv():
+ *  The iovs[] array contains a single PDU for transmission to
+ *  the network. It will never be empty.
+ *  Return -1 if there was an error sending the PDU, and set errno.
+ *  Return 0+ to indicate success.
+ */
 void proto_set_on_sendv(struct proto *p,
     int (*on_sendv)(struct proto *p, const struct iovec *iovs, int niovs));
 
@@ -99,3 +148,12 @@ void proto_set_on_error(struct proto *p,
 #define PROTO_MODE_FRAMED	3	/* TV */
 int proto_set_mode(struct proto *p, int mode);
 int proto_get_mode(struct proto *p);
+
+/*
+ * Note: PROTO_MODE_FRAMED is an efficient mode that can be used
+ * when the transport stream provides its own framing. (For example
+ * Linux's SOCK_SEQPACKET). If this mode is used, proto_recv() must
+ * be used to send exactly one PDU at a time. In return, on_send()
+ * will similarly be called with exactly one PDU at a time.
+ * This mode operates with very few buffer copies.
+ */

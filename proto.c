@@ -51,16 +51,20 @@ struct proto {
 	} t;
 };
 
-/* Common code for handling parameter errors in the proto_output() path */
+/* Common function for sending a message to on_error */
 static void
-output_errorv(struct proto *p, int err, const char *fmt, va_list ap)
+proto_errorv(struct proto *p, int err, const char *tag,
+	const char *fmt, va_list ap)
 {
 	if (p->on_error) {
 		char buf[16384];
-		vsnprintf(buf, sizeof buf, fmt, ap);
+		int n = 0;
+		if (tag)
+			n = snprintf(buf, sizeof buf, "%s: ", tag);
+		vsnprintf(buf + n, sizeof buf - n, fmt, ap);
 		p->on_error(p, buf);
 	} else {
-		fprintf(stderr, "proto_output: ");
+		fprintf(stderr, "%s: ", tag);
 		vfprintf(stderr, fmt, ap);
 		fprintf(stderr, "\n");
 	}
@@ -258,7 +262,7 @@ binary_pkt_len(struct rxbuf *rx)
 }
 
 static int
-proto_recv_binary(struct proto *p, const char *net, unsigned int netlen)
+recv_binary(struct proto *p, const char *net, unsigned int netlen)
 {
 	int ret = 0;
 
@@ -309,7 +313,7 @@ proto_recv_binary(struct proto *p, const char *net, unsigned int netlen)
 /* -- framed decode -- */
 
 static int
-proto_recv_framed(struct proto *p, const char *net, unsigned int netlen)
+recv_framed(struct proto *p, const char *net, unsigned int netlen)
 {
 	if (!p->on_input)
 		return netlen;
@@ -345,7 +349,7 @@ static struct {
  * Returns -1 on unrecoverable errors.
  * Returns 1 on good data and on protocol errors. */
 static int
-proto_recv_text_1ch(struct proto *p, char ch)
+recv_text_1ch(struct proto *p, char ch)
 {
 	unsigned int i;
 	struct textproto *t = &p->t;
@@ -508,13 +512,13 @@ again:
 }
 
 static int
-proto_recv_text(struct proto *p, const char *net, unsigned int netlen)
+recv_text(struct proto *p, const char *net, unsigned int netlen)
 {
 	unsigned int i;
 	int ret = 0;
 
 	if (!netlen) {
-		if (proto_recv_text_1ch(p, '\n') == -1)
+		if (recv_text_1ch(p, '\n') == -1)
 			return -1;
 		if (p->on_input)
 			ret = p->on_input(p, MSG_EOF, NULL, 0);
@@ -522,7 +526,7 @@ proto_recv_text(struct proto *p, const char *net, unsigned int netlen)
 	}
 
 	for (i = 0; i < netlen; i++) {
-		int n = proto_recv_text_1ch(p, net[i]);
+		int n = recv_text_1ch(p, net[i]);
 		if (n <= 0)
 			return n;
 		ret += n;
@@ -553,11 +557,11 @@ proto_recv(struct proto *p, const void *netv, unsigned int netlen)
 
 	switch (p->mode) {
 	case PROTO_MODE_BINARY:
-		return proto_recv_binary(p, net, netlen);
+		return recv_binary(p, net, netlen);
 	case PROTO_MODE_TEXT:
-		return proto_recv_text(p, net, netlen);
+		return recv_text(p, net, netlen);
 	case PROTO_MODE_FRAMED:
-		return proto_recv_framed(p, net, netlen);
+		return recv_framed(p, net, netlen);
 	default:
 		errno = EINVAL; /* bad mode */
 		return -1;
@@ -575,13 +579,13 @@ static char outbuf[4096];
 unsigned int outbuf_len;
 
 static void
-proto_outbuf_init(struct proto *p)
+outbuf_init(struct proto *p)
 {
 	outbuf_len = 0;
 }
 
 static int
-proto_outbuf_flush(struct proto *p)
+outbuf_flush(struct proto *p)
 {
 	if (outbuf_len) {
 		struct iovec iov;
@@ -616,7 +620,7 @@ proto_outbuf(struct proto *p, const char *data, unsigned int datasz)
 		/* Medium writes: pack buffer, drain, start new fill */
 		memcpy(&outbuf[outbuf_len], data, space);
 		outbuf_len += space;
-		if (proto_outbuf_flush(p) == -1)
+		if (outbuf_flush(p) == -1)
 			return -1;
 		outbuf_len = datasz - space;
 		memcpy(outbuf, data + space, outbuf_len);
@@ -625,17 +629,17 @@ proto_outbuf(struct proto *p, const char *data, unsigned int datasz)
 }
 
 static int
-proto_outbuf_putc(struct proto *p, int ch)
+outbuf_putc(struct proto *p, int ch)
 {
 	outbuf[outbuf_len++] = ch;
 	if (outbuf_len == sizeof outbuf)
-		return proto_outbuf_flush(p);
+		return outbuf_flush(p);
 	return 0;
 }
 
 /* Called when the output has been aborted */
 static int
-proto_outbuf_cancel(struct proto *p)
+outbuf_cancel(struct proto *p)
 {
 	return 0;
 }
@@ -648,22 +652,22 @@ proto_outbuf_cancel(struct proto *p)
  * Returns -1.
  */
 static int
-text_output_error(struct proto *p, int err, const char *fmt, ...)
+output_text_error(struct proto *p, int err, const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	output_errorv(p, err, fmt, ap);
+	proto_errorv(p, err, "proto_output{text}", fmt, ap);
 	va_end(ap);
-	(void)proto_outbuf_cancel(p);
+	(void)outbuf_cancel(p);
 	return -1;
 }
 
 /* Sends a string argument; quoting if needed */
 static int
-proto_send_text_string(struct proto *p, const char *str, unsigned int len)
+output_text_string(struct proto *p, const char *str, unsigned int len)
 {
 	if (len > 0xffff)
-		return text_output_error(p, EINVAL,
+		return output_text_error(p, EINVAL,
 			"string too big, %u > %u", len, 0xffff);
 	if (len == 0 ||
 	    str[0] == '"' ||
@@ -671,7 +675,7 @@ proto_send_text_string(struct proto *p, const char *str, unsigned int len)
 	    memchr(str, '\r', len) ||
 	    memchr(str, '\n', len))
 	{
-		if (proto_outbuf_putc(p, '"') == -1)
+		if (outbuf_putc(p, '"') == -1)
 			return -1;
 		while (len--) {
 			char ch = *str++;
@@ -685,18 +689,18 @@ proto_send_text_string(struct proto *p, const char *str, unsigned int len)
 				if (proto_outbuf(p, esc, sizeof esc) == -1)
 					return -1;
 			} else {
-				if (proto_outbuf_putc(p, ch) == -1)
+				if (outbuf_putc(p, ch) == -1)
 					return -1;
 			}
 		}
-		return proto_outbuf_putc(p, '"');
+		return outbuf_putc(p, '"');
 	}
 
 	return proto_outbuf(p, str, len);
 }
 
 static int
-proto_output_text(struct proto *p, const char *fmt, va_list ap)
+output_text(struct proto *p, const char *fmt, va_list ap)
 {
 	unsigned char msgid;
 	unsigned int j;
@@ -709,12 +713,12 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 	const char *str;
 	char *nulpos;
 
-	proto_outbuf_init(p);
+	outbuf_init(p);
 
 	/* The format string must start with %c for the msg ID */
 	while (*fmt == ' ') fmt++;
 	if (fmt[0] != '%' || fmt[1] != 'c')
-		return text_output_error(p, EINVAL,
+		return output_text_error(p, EINVAL,
 			"format string must start with %%c (%s)", fmt);
 	fmt += 2;
 	msgid = va_arg(ap, int);
@@ -725,7 +729,7 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 			break;
 	word = cmdtab[j].word;
 	if (!word)
-		return text_output_error(p, EINVAL,
+		return output_text_error(p, EINVAL,
 			"unknown command ID %02x", msgid);
 
 	/* Send the command word first */
@@ -740,7 +744,7 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 		f = *fmt++;
 		if (f == ' ') continue;
 		if (f != '%')
-			return text_output_error(p, EINVAL,
+			return output_text_error(p, EINVAL,
 				"%s: unexpected char in format: '%c'",
 				word,f);
 		f = *fmt++;
@@ -753,17 +757,17 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 
 		/* Send a space before each arg, but not %c,0 */
 		if (t != '0')
-			if (proto_outbuf_putc(p, ' ') == -1)
+			if (outbuf_putc(p, ' ') == -1)
 				return -1;
 
 		switch (t) {
 		case '\0':
-			return text_output_error(p, EINVAL,
+			return output_text_error(p, EINVAL,
 				"%s: excess format %%%c can't be matched",
 				word, f);
 		case 'i':
 			if (f != 'c')
-				return text_output_error(p, EINVAL,
+				return output_text_error(p, EINVAL,
 					"%s: expected %%c, got %%%c", word, f);
 			ch = va_arg(ap, int);
 			len = snprintf(ibuf, sizeof ibuf, "%u", ch & 0xff);
@@ -772,11 +776,11 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 			break;
 		case '0':
 			if (f != 'c')
-				return text_output_error(p, EINVAL,
+				return output_text_error(p, EINVAL,
 					"%s: expected %%c, got %%%c", word, f);
 			ch = va_arg(ap, int);
 			if (ch != 0)
-				return text_output_error(p, EINVAL,
+				return output_text_error(p, EINVAL,
 					"%s: expected 0 for %%c, got %d",
 					word, ch);
 			/* no need to emit anything here */
@@ -785,21 +789,21 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 			if (f == 's') { /* got %s */
 				str = va_arg(ap, char *);
 				if (!str)
-					return text_output_error(p,
+					return output_text_error(p,
 						EINVAL, "%s: got NULL for %%s",
 						word);
 				len = strlen(str);
-				if (proto_send_text_string(p, str, len) == -1)
+				if (output_text_string(p, str, len) == -1)
 					return -1;
 				break;
 			}
 			if (f != '*')
-				return text_output_error(p, EINVAL,
+				return output_text_error(p, EINVAL,
 					"%s: unexpected %%%c for text",
 					word, f);
 			f = *fmt++;
 			if (f != 's')
-				return text_output_error(p, EINVAL,
+				return output_text_error(p, EINVAL,
 					"%s: unexpected %%*%c for text",
 					word, f);
 			len = va_arg(ap, int);
@@ -810,28 +814,28 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
 			    !*fmt &&
 			    (nulpos = memchr(str, 0, len)))
 			{
-				if (proto_send_text_string(p, str,
+				if (output_text_string(p, str,
 				    nulpos - str) == -1)
 					return -1;
-				if (proto_outbuf_putc(p, ' ') == -1)
+				if (outbuf_putc(p, ' ') == -1)
 					return -1;
 				len -= (nulpos + 1) - str;
 				str = nulpos + 1;
 				tfmt = ""; /* skip |0t */
 				optional = 1;
 			}
-			if (proto_send_text_string(p, str, len)
+			if (output_text_string(p, str, len)
 				== -1) return -1;
 			break;
 		default: abort();
 		}
 	}
 	if (!optional && *tfmt && *tfmt != '|')
-		return text_output_error(p, EINVAL,
+		return output_text_error(p, EINVAL,
 			"%s: missing required argument (%c)", word, *tfmt);
 	if (proto_outbuf(p, "\r\n", 2) == -1)
 		return -1;
-	return proto_outbuf_flush(p);
+	return outbuf_flush(p);
 }
 
 /* -- binary encode -- */
@@ -843,11 +847,11 @@ proto_output_text(struct proto *p, const char *fmt, va_list ap)
  * Returns -1.
  */
 static int
-binary_output_error(struct proto *p, int err, const char *fmt, ...)
+output_binary_error(struct proto *p, int err, const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	output_errorv(p, err, fmt, ap);
+	proto_errorv(p, err, "proto_output{binary}", fmt, ap);
 	va_end(ap);
 	return -1;
 }
@@ -871,14 +875,14 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 		if (f == ' ')
 			continue;
 		if (f != '%')
-			return binary_output_error(p, EINVAL,
+			return output_binary_error(p, EINVAL,
 				"unexpected format char %c", f);
 		if (iov >= iov_start + maxiov) {
 			errno = ENOMEM;
 			return -1;	/* too many % args */
 		}
 		if (iov == iov_start && *fmt != 'c')
-			return binary_output_error(p, EINVAL,
+			return output_binary_error(p, EINVAL,
 				"expected %%c but got %%%c", *fmt);
 		switch (*fmt++) {
 		case '*':
@@ -912,12 +916,12 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 			iov++;
 			break;
 		default:
-			return binary_output_error(p, EINVAL,
+			return output_binary_error(p, EINVAL,
 				"unknown format %%%c", *(fmt - 1));
 		}
 	}
 	if (iov == iov_start)
-		return binary_output_error(p, EINVAL, "empty format");
+		return output_binary_error(p, EINVAL, "empty format");
 	if (lenp) {
 		/* Calculate the total size */
 		size_t len = 0;
@@ -937,7 +941,7 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 }
 
 static int
-proto_output_binary(struct proto *p, const char *fmt, va_list ap)
+output_binary(struct proto *p, const char *fmt, va_list ap)
 {
 	struct iovec iov[10];
 	int niov = to_binary_iov(p, iov, 10, fmt, ap);
@@ -949,7 +953,7 @@ proto_output_binary(struct proto *p, const char *fmt, va_list ap)
 }
 
 static int
-proto_output_framed(struct proto *p, const char *fmt, va_list ap)
+output_framed(struct proto *p, const char *fmt, va_list ap)
 {
 	struct iovec iov[10];
 	int niov = to_binary_iov(p, iov, 10, fmt, ap);
@@ -961,6 +965,16 @@ proto_output_framed(struct proto *p, const char *fmt, va_list ap)
 	if (p->on_sendv)
 		return p->on_sendv(p, iov, niov);
 	return 0;
+}
+
+static int
+output_error(struct proto *p, int err, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	proto_errorv(p, err, "proto_output", fmt, ap);
+	va_end(ap);
+	return -1;
 }
 
 int
@@ -975,16 +989,16 @@ proto_output(struct proto *p, const char *fmt, ...)
 	va_start(ap, fmt);
 	switch (p->mode) {
 	case  PROTO_MODE_BINARY:
-		ret = proto_output_binary(p, fmt, ap);
+		ret = output_binary(p, fmt, ap);
 		break;
 	case PROTO_MODE_TEXT:
-		ret = proto_output_text(p, fmt, ap);
+		ret = output_text(p, fmt, ap);
 		break;
 	case PROTO_MODE_FRAMED:
-		ret = proto_output_framed(p, fmt, ap);
+		ret = output_framed(p, fmt, ap);
 		break;
 	default:
-		ret = binary_output_error(p, EINVAL, "bad mode %d", p->mode);
+		ret = output_error(p, EINVAL, "bad mode %d", p->mode);
 	}
 	va_end(ap);
 	return ret;
