@@ -35,9 +35,9 @@ Client Commands
 
 	    The client indicates the protocol version it wishes to talk
 	    and optionally identifies itself to the server. This
-	    document describes version 0x00. This should be the first
-	    message. A client need not wait for the VERSION response
-	    before sending version 0x00 commands.
+	    document describes version 0. This should be the first
+	    message if sent. A client need not wait for the VERSION response
+	    before sending subsquent commands compatible with version 0.
 
 	SUB <pattern>
 	UNSUB <pattern>
@@ -137,12 +137,22 @@ Binary form of messages
 	Each of <key>, <pattern> and <text> are in UTF-8.
 	The <id> used for pings is arbitrary-length binary.
 
-	A binary client must always send a HELLO message.
-
 	If a server sends an ERROR message in binary mode, it must
 	immediately close the connection.
 
 	The maxium size of a binary message is 65538 bytes.
+
+	A binary client need not send a HELLO message if it
+	is going to use version 0 messages.
+
+	A server should switch to text protocol if the first received byte
+	from a client is one of 0x0A 0x0D 0x20 or 0x40-0x7E.
+	Some message IDs are therefore reserved for this purpose.
+
+		0x0A <reserved>
+		0x0D <reserved>
+		0x20 <reserved>
+		0x40-0x7E <reserved>
 
 Text form of messages
 

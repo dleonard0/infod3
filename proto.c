@@ -549,10 +549,13 @@ proto_recv(struct proto *p, const void *netv, unsigned int netlen)
 	}
 
 	if (p->mode == PROTO_MODE_UNKNOWN) {
-		if (net[0] == CMD_HELLO)
-			p->mode = PROTO_MODE_BINARY;
-		else
+		/* Select mode based on first byte */
+		char ch = net[0];
+		if (ch == '\n' || ch == '\r' || ch == ' ' ||
+		    (ch >= 0x40 && ch <= '~'))
 			p->mode = PROTO_MODE_TEXT;
+		else
+			p->mode = PROTO_MODE_BINARY;
 	}
 
 	switch (p->mode) {
