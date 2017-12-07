@@ -186,8 +186,6 @@ static void
 server_accept(struct server *server, int listen_fd, void *listener_data)
 {
 	int fd;
-	int i;
-	void *data;
 
 	fd = accept(listen_fd, NULL, NULL);
 	if (fd == -1) {
@@ -195,12 +193,21 @@ server_accept(struct server *server, int listen_fd, void *listener_data)
 		return;
 	}
 
-	i = server_add_socket(server, fd);
-	if (i == -1) {
+	if (server_add_fd(server, fd, listener_data) == -1) {
 		if (close(fd) == -1)
-			on_error(server, "close: %s", strerror(errno));
-		return;
+			on_error(server, "server_add_fd: %s", strerror(errno));
 	}
+}
+
+int
+server_add_fd(struct server *server, int fd, void *listener_data)
+{
+	int i;
+	void *data;
+
+	i = server_add_socket(server, fd);
+	if (i == -1)
+		return -1;
 
 	if (server->context->on_accept) {
 		data = server->context->on_accept(server, fd, listener_data);
@@ -211,6 +218,7 @@ server_accept(struct server *server, int listen_fd, void *listener_data)
 				break;
 			}
 	}
+	return 0;
 }
 
 int

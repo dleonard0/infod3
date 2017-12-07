@@ -53,6 +53,12 @@ struct server *server_new(const struct server_context *c);
  * Returns -1 on error. (ENOMEM) */
 int server_add_listener(struct server *server, int fd, void *listener);
 
+/* Adds an established connection to the server.
+ * On success, the server will manage the fd's lifetime.
+ * Returns -1 on error.
+ */
+int server_add_fd(struct server *server, int fd, void *listener);
+
 /* Dispatch all pending I/O just once, possibly blocking.
  * Call this multiple times in a loop.
  * A timeout of -1 blocks forever. See poll().
