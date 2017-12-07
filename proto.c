@@ -152,6 +152,15 @@ rxbuf_trimspace(struct rxbuf *rx)
 		--rx->len;
 }
 
+static int
+rxbuf_zeropad(struct rxbuf *rx)
+{
+	if (rxbuf_add(rx, "", 1) == -1)
+		return -1;
+	--rx->len;
+	return 0;
+}
+
 /* -- proto init, fini, setters and getters -- */
 
 struct proto *
@@ -248,6 +257,16 @@ proto_output_error(struct proto *p, const char *fmt, ...)
 	return -1;
 }
 
+static int
+recv_error(struct proto *p, int err, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	proto_errorv(p, err, "proto_recv", fmt, ap);
+	va_end(ap);
+	return -1;
+}
+
 /* -- binary decode -- */
 
 /* Returns the length field (bytes 1 and 2) from the buffer,
@@ -297,7 +316,10 @@ recv_binary(struct proto *p, const char *net, unsigned int netlen)
 		    p->rx.len == 3 + (sz = binary_pkt_len(&p->rx)))
 		{
 			if (p->on_input) {
-				int n = p->on_input(p, p->rx.buf[0] & 0xff,
+				int n;
+				if (rxbuf_zeropad(&p->rx) == -1)
+					return -1;
+				n = p->on_input(p, p->rx.buf[0] & 0xff,
 					p->rx.buf + 3, sz);
 				if (n <= 0)
 					return n;
@@ -415,8 +437,11 @@ again:
 			if (!t->optional && *t->fmt) {
 				proto_output_error(p, "missing arg for '%s'", t->cmd);
 			} else if (p->on_input) {
+				int ret;
 				/* pass up full input command */
-				int ret = p->on_input(p, p->rx.buf[0] & 0xff,
+				if (rxbuf_zeropad(&p->rx) == -1)
+					return -1;
+				ret = p->on_input(p, p->rx.buf[0] & 0xff,
 					&p->rx.buf[1], p->rx.len - 1);
 				if (ret <= 0)
 					return ret;
@@ -547,6 +572,9 @@ proto_recv(struct proto *p, const void *netv, unsigned int netlen)
 			p->on_input(p, MSG_EOF, NULL, 0);
 		return 0;
 	}
+
+	if (net[netlen])
+		return recv_error(p, EINVAL, "terminal NUL missing");
 
 	if (p->mode == PROTO_MODE_UNKNOWN) {
 		/* Select mode based on first byte */

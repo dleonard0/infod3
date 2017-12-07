@@ -86,6 +86,9 @@ void *proto_get_udata(struct proto *p);
  *  Receive a PDU or partial PDU from the network.
  *  Parameters net,netlen describe the binary data received.
  *  Pass a netlen of 0 to indicate the peer closed the connection.
+ *  The net parameter (if not NULL) must point to a buffer of
+ *  at least netlen+1 bytes in length, and guarantee that
+ *  the byte at net+netlen is NUL.
  *  Returns -1 on unrecoverable protocol error (eg ENOMEM).
  *  Returns 0 or -1 to indicate the connection should be closed.
  */
@@ -97,6 +100,8 @@ int proto_recv(struct proto *p, const void *net, unsigned int netlen);
  *  The <msg,data> parameters hold the received message from the network.
  *  MSG_EOF indicates the peer closed the connection, and on_input
  *  should return 0.
+ *  The data parameter points to a buffer that is at least datalen+1
+ *  bytes long, and guarantees that data[datalen]=='\0'.
  *  Return -1 for unrecoverable errors, and set errno.
  *  Return 1 to indicate the message was serviced. It is permissible
  *  for on_input() to call proto_output().

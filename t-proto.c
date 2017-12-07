@@ -133,7 +133,11 @@ mock_on_input_fn(struct proto *p, unsigned char msg,
 	mock_on_input.p = p;
 	mock_on_input.msg = msg;
 	mock_on_input.datalen = datalen;
-	memcpy(mock_on_input.data, data, datalen);
+
+	if (data) {
+		assert(data[datalen] == '\0');
+		memcpy(mock_on_input.data, data, datalen);
+	}
 
 #if DEBUG
 	dprintf("mock_on_input_fn(p=%p, msg=%s, datalen=%u) -> %d %s #%u\n",
@@ -399,6 +403,9 @@ static char Mega[MEGA_SIZE];
 
 /* -- binary protocol tests -- */
 
+#define assert_proto_recv(p, s) \
+	assert(proto_recv(p, s, sizeof s - 1) > 0)
+
 static void
 test_binary_proto()
 {
@@ -417,43 +424,43 @@ test_binary_proto()
 	assert(proto_get_mode(p) == PROTO_MODE_UNKNOWN);
 
 	/* Auto-detect on the first hello message */
-	assert(proto_recv(p, "\x00\0\6\3Hello", 9) > 0);
+	assert_proto_recv(p, "\x00\0\6\3Hello");
 	assert(proto_get_mode(p) == PROTO_MODE_BINARY);
 	assert_mock_on_input(p, CMD_HELLO, "\3Hello");
 
 	/* Exercise receiving all of the message types [from net] */
-	assert(proto_recv(p, "\x00\0\1\3", 4) > 0);
+	assert_proto_recv(p, "\x00\0\1\3");
 	assert_mock_on_input(p, CMD_HELLO, "\3");
-	assert(proto_recv(p, "\x01\0\4test", 7) > 0);
+	assert_proto_recv(p, "\x01\0\4test");
 	assert_mock_on_input(p, CMD_SUB, "test");
-	assert(proto_recv(p, "\x02\0\4yeah", 7) > 0);
+	assert_proto_recv(p, "\x02\0\4yeah");
 	assert_mock_on_input(p, CMD_UNSUB, "yeah");
-	assert(proto_recv(p, "\x03\0\3key", 6) > 0);
+	assert_proto_recv(p, "\x03\0\3key");
 	assert_mock_on_input(p, CMD_GET, "key");
-	assert(proto_recv(p, "\x04\0\3key", 6) > 0);
+	assert_proto_recv(p, "\x04\0\3key");
 	assert_mock_on_input(p, CMD_PUT, "key");
-	assert(proto_recv(p, "\x04\0\013key\0val\0nul", 14) > 0);
+	assert_proto_recv(p, "\x04\0\013key\0val\0nul");
 	assert_mock_on_input(p, CMD_PUT, "key\0val\0nul");
-	assert(proto_recv(p, "\x05\0\0", 3) > 0);
+	assert_proto_recv(p, "\x05\0\0");
 	assert_mock_on_input(p, CMD_BEGIN, "");
-	assert(proto_recv(p, "\x06\0\0", 3) > 0);
+	assert_proto_recv(p, "\x06\0\0");
 	assert_mock_on_input(p, CMD_COMMIT, "");
-	assert(proto_recv(p, "\x07\0\0", 3) > 0);
+	assert_proto_recv(p, "\x07\0\0");
 	assert_mock_on_input(p, CMD_PING, "");
-	assert(proto_recv(p, "\x07\0\1x", 4) > 0);
+	assert_proto_recv(p, "\x07\0\1x");
 	assert_mock_on_input(p, CMD_PING, "x");
 
-	assert(proto_recv(p, "\x80\0\4\3foo", 7) > 0);
+	assert_proto_recv(p, "\x80\0\4\3foo");
 	assert_mock_on_input(p, MSG_VERSION, "\3foo");
-	assert(proto_recv(p, "\x81\0\3key", 6) > 0);
+	assert_proto_recv(p, "\x81\0\3key");
 	assert_mock_on_input(p, MSG_INFO, "key");
-	assert(proto_recv(p, "\x81\0\013key\0val\0nul", 14) > 0);
+	assert_proto_recv(p, "\x81\0\013key\0val\0nul");
 	assert_mock_on_input(p, MSG_INFO, "key\0val\0nul");
-	assert(proto_recv(p, "\x82\0\0", 3) > 0);
+	assert_proto_recv(p, "\x82\0\0");
 	assert_mock_on_input(p, MSG_PONG, "");
-	assert(proto_recv(p, "\x82\0\1x", 4) > 0);
+	assert_proto_recv(p, "\x82\0\1x");
 	assert_mock_on_input(p, MSG_PONG, "x");
-	assert(proto_recv(p, "\x83\0\5error", 8) > 0);
+	assert_proto_recv(p, "\x83\0\5error");
 	assert_mock_on_input(p, MSG_ERROR, "error");
 
 	/* Exercise sending all of the message types [to net] */
@@ -556,9 +563,6 @@ test_text_proto()
 
 	/* Initially the protocol mode is unknown */
 	assert(proto_get_mode(p) == PROTO_MODE_UNKNOWN);
-
-#define assert_proto_recv(p, s) \
-	assert(proto_recv(p, s, sizeof s - 1) > 0)
 
 	/* Recieving a text message auto-detects text mode */
 	assert_proto_recv(p, "hello 0\n");
@@ -728,7 +732,7 @@ test_text_proto()
 	mock_on_input.retval = -1;
 	mock_on_input.reterrno = ENODEV;
 	errno = 0;
-	assert(proto_recv(p, "hello 0\r", 9) == -1);
+	assert(proto_recv(p, "hello 0\r", sizeof "hello 0\r" - 1) == -1);
 	assert(errno == ENODEV);
 
 	/* Test returning a close indicator */
@@ -769,6 +773,7 @@ test_framed_proto()
 	assert(memcmp(mock_on_sendv.data + 1, Mega, 0xffff) == 0);
 	mock_on_sendv_clear();
 
+	Mega[1 + 0xffff] = '\0';
 	assert(proto_recv(p, Mega, 1 + 0xffff) > 0);
 	assert(mock_on_input.counter == 1);
 	assert(mock_on_input.msg == 'M'); /* XXX only works because of frame */
@@ -780,7 +785,7 @@ test_framed_proto()
 	mock_on_input.retval = -1;
 	mock_on_input.reterrno = ENODEV;
 	errno = 0;
-	assert(proto_recv(p, "\0\0", 9) == -1);
+	assert(proto_recv(p, "\0\0", 2) == -1);
 	assert(errno == ENODEV);
 
 	/* Test returning a close indicator */
