@@ -2,8 +2,18 @@
 #include "match.h"
 
 #define MAX_PAREN 4
+
+char CHECK[] = "";
+
+/*
+ * Match pattern against string.
+ * If string is the special pointer CHECK, then the
+ * pattern parameter is only checked for errors.
+ * Returns -1 on error or string mismatch
+ * Returns 0 on success
+ */
 int
-match(const char *pattern, const char *string)
+do_match(const char *pattern, const char *string)
 {
 	char p;
 	struct {
@@ -15,16 +25,19 @@ match(const char *pattern, const char *string)
 	while ((p = *pattern++)) {
 		if (p == '*') {
 			char n = *pattern;	/* '*n' */
-			if (!n || n == '|' || n == ')')
-				string = "";	/* greedy to end of string */
-			else if (n == '*' || n == '(')
+			if (n == '*' || n == '(')
 				return -1;	/* malformed pattern */
-			else {
+			else if (!n || n == '|' || n == ')') {
+				/* greedy to end of string */
+				if (string != CHECK)
+					string = "";
+			} else {
 				if (n == '\\') {	/* '*\n' */
 					if (!(n = pattern[1]))
 						return -1; /* \ at end */
 				}
-				while (*string && *string != n)
+				if (string != CHECK)
+				    while (*string && *string != n)
 					string++;	/* greedy forward */
 			}
 		} else if (p == '(') {
@@ -46,7 +59,8 @@ match(const char *pattern, const char *string)
 			if (!paren->failed && !paren->success)
 				paren->success = string;
 			/* restart again */
-			string = paren->string;
+			if (string != CHECK)
+				string = paren->string;
 			paren->failed = 0;
 		} else if (p == ')') {
 			if (!paren)
@@ -55,12 +69,13 @@ match(const char *pattern, const char *string)
 				paren->success = string;
 			if (paren == &parens[0]) {
 				/* outer-level paren */
-				string = paren->success;
+				if (string != CHECK)
+					string = paren->success;
 				paren = NULL;
 				if (!string)
 					return -1; /* failed on outer ) */
 			} else {
-				if (paren->success)
+				if (paren->success && string != CHECK)
 					string = paren->success;
 				else
 					(paren - 1)->failed = 1;
@@ -72,7 +87,9 @@ match(const char *pattern, const char *string)
 				if (!p)
 					return -1; /* \ at end of pattern */
 			}
-			if (*string == p)
+			if (string == CHECK)
+				; /* only doing validity check */
+			else if (*string == p)
 				string++;
 			else if (paren)
 				paren->failed = 1;
@@ -82,7 +99,21 @@ match(const char *pattern, const char *string)
 	}
 	if (paren)
 		return -1;	/* unclosed ( */
+	if (string == CHECK)
+		return 0;	/* passed checks */
 	if (*string)
 		return -1;	/* string unexhausted */
 	return 0;
+}
+
+int
+match(const char *pattern, const char *string)
+{
+	return do_match(pattern, string);
+}
+
+int
+match_isvalid(const char *pattern)
+{
+	return do_match(pattern, CHECK) != -1;
 }

@@ -2,9 +2,13 @@
 #include "match.h"
 
 #define PASS(pattern, string) \
+	assert(match_isvalid(pattern)); \
 	assert(match(pattern, string) == 0)
 #define FAIL(pattern, string) \
+	assert(match_isvalid(pattern)); \
 	assert(match(pattern, string) == -1)
+#define INVALID(pattern) \
+	assert(!match_isvalid(pattern))
 
 int
 main()
@@ -49,9 +53,9 @@ main()
 	FAIL("(a|b(c|d)e|f)g", "bfg");
 
 	/* Malformed */
-	FAIL("(", "");
-	FAIL(")", "");
-	FAIL("|", "");
-	FAIL("\\", "\\");
-	FAIL("**", "");
+	INVALID("(");
+	INVALID(")");
+	INVALID("|");
+	INVALID("\\");
+	INVALID("**");
 }

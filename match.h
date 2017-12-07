@@ -31,3 +31,4 @@
  */
 int match(const char *pattern, const char *string);
 
+int match_isvalid(const char *pattern);
