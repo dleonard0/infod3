@@ -229,6 +229,9 @@ server_poll(struct server *server, int timeout)
 	int revents;
 	unsigned int i;
 
+	if (!server->n)
+		return 0;
+
 	/* The revents are kept zero elsewhere */
 	/* for (i = 0; i < server->n; i++) server->pollfd[i].revents = 0; */
 

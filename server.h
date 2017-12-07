@@ -62,7 +62,7 @@ int server_add_fd(struct server *server, int fd, void *listener);
 /* Dispatch all pending I/O just once, possibly blocking.
  * Call this multiple times in a loop.
  * A timeout of -1 blocks forever. See poll().
- * Returns what poll() returns. */
+ * Returns 0 if there are no FDs, otherwise what poll() returns. */
 int server_poll(struct server *server, int timeout);
 
 /* Shut down the read side of a FD.
