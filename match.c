@@ -9,16 +9,17 @@ char CHECK[] = "";
  * Match pattern against string.
  * If string is the special pointer CHECK, then the
  * pattern parameter is only checked for errors.
- * Returns -1 on error or string mismatch
- * Returns 0 on success
+ * Returns 1 on success
+ * Returns 0 on mismatch
+ * Returns -1 on invalid pattern
  */
 int
 do_match(const char *pattern, const char *string)
 {
 	char p;
 	struct {
-	    const char *string; /* string position at ( */
-	    int failed;         /* mismatch after '(' or '|' */
+	    const char *start; /* string position at ( */
+	    int failed;         /* iff mismatch after '(' or '|' */
 	    const char *success;/* unfailed string position at '|' */
 	} parens[MAX_PAREN], *paren = NULL;
 
@@ -51,16 +52,14 @@ do_match(const char *pattern, const char *string)
 			}
 			paren->failed = 0;
 			paren->success = NULL;
-			/* record string position at ( for restart */
-			paren->string = string;
+			paren->start = string;
 		} else if (p == '|') {
 			if (!paren)
 				return -1;	/* | without ( */
 			if (!paren->failed && !paren->success)
 				paren->success = string;
-			/* restart again */
 			if (string != CHECK)
-				string = paren->string;
+				string = paren->start;
 			paren->failed = 0;
 		} else if (p == ')') {
 			if (!paren)
@@ -71,13 +70,14 @@ do_match(const char *pattern, const char *string)
 				/* outer-level paren */
 				if (string != CHECK)
 					string = paren->success;
-				paren = NULL;
 				if (!string)
-					return -1; /* failed on outer ) */
+					return 0; /* mismatch at outer ) */
+				paren = NULL;
 			} else {
-				if (paren->success && string != CHECK)
-					string = paren->success;
-				else
+				if (paren->success) {
+					if (string != CHECK)
+						string = paren->success;
+				} else
 					(paren - 1)->failed = 1;
 				paren--;
 			}
@@ -94,16 +94,14 @@ do_match(const char *pattern, const char *string)
 			else if (paren)
 				paren->failed = 1;
 			else
-				return -1;	/* \x mismatch */
+				return 0;	/* char mismatch */
 		}
 	}
 	if (paren)
 		return -1;	/* unclosed ( */
 	if (string == CHECK)
-		return 0;	/* passed checks */
-	if (*string)
-		return -1;	/* string unexhausted */
-	return 0;
+		return 1;	/* passed checks */
+	return *string == '\0';	/* pass iff string exhausted */
 }
 
 int
@@ -115,5 +113,5 @@ match(const char *pattern, const char *string)
 int
 match_isvalid(const char *pattern)
 {
-	return do_match(pattern, CHECK) != -1;
+	return do_match(pattern, CHECK) == 1;
 }

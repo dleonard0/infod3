@@ -3,10 +3,10 @@
 
 #define PASS(pattern, string) \
 	assert(match_isvalid(pattern)); \
-	assert(match(pattern, string) == 0)
+	assert(match(pattern, string))
 #define FAIL(pattern, string) \
 	assert(match_isvalid(pattern)); \
-	assert(match(pattern, string) == -1)
+	assert(!match(pattern, string))
 #define INVALID(pattern) \
 	assert(!match_isvalid(pattern))
 
