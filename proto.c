@@ -981,28 +981,32 @@ output_error(struct proto *p, int err, const char *fmt, ...)
 }
 
 int
+proto_outputv(struct proto *p, const char *fmt, va_list ap)
+{
+	if (p->mode == PROTO_MODE_UNKNOWN)
+		p->mode = PROTO_MODE_BINARY; /* prefer binary */
+
+	switch (p->mode) {
+	case  PROTO_MODE_BINARY:
+		return output_binary(p, fmt, ap);
+	case PROTO_MODE_TEXT:
+		return output_text(p, fmt, ap);
+	case PROTO_MODE_FRAMED:
+		return output_framed(p, fmt, ap);
+	default:
+		return output_error(p, EINVAL, "bad mode %d", p->mode);
+	}
+}
+
+int
 proto_output(struct proto *p, const char *fmt, ...)
 {
 	va_list ap;
 	int ret;
 
-	if (p->mode == PROTO_MODE_UNKNOWN)
-		p->mode = PROTO_MODE_BINARY; /* prefer binary */
-
 	va_start(ap, fmt);
-	switch (p->mode) {
-	case  PROTO_MODE_BINARY:
-		ret = output_binary(p, fmt, ap);
-		break;
-	case PROTO_MODE_TEXT:
-		ret = output_text(p, fmt, ap);
-		break;
-	case PROTO_MODE_FRAMED:
-		ret = output_framed(p, fmt, ap);
-		break;
-	default:
-		ret = output_error(p, EINVAL, "bad mode %d", p->mode);
-	}
+	ret = proto_outputv(p, fmt, ap);
 	va_end(ap);
+
 	return ret;
 }

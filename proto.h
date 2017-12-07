@@ -1,4 +1,5 @@
 #pragma once
+#include <stdarg.h>
 
 /*
  * infod3 network protocol translator.
@@ -122,6 +123,7 @@ void proto_set_on_input(struct proto *p,
  */
 __attribute__((format(printf, 2, 3)))
 int proto_output(struct proto *p, const char *fmt, ...);
+int proto_outputv(struct proto *p, const char *fmt, va_list ap);
 
 struct iovec;
 
