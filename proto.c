@@ -244,7 +244,7 @@ proto_output_error(struct proto *p, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof buf, fmt, ap);
 	va_end(ap);
-	proto_output(p, "%c%s", MSG_ERROR, buf);
+	proto_output(p, MSG_ERROR, "%s", buf);
 	return -1;
 }
 
@@ -703,9 +703,8 @@ output_text_string(struct proto *p, const char *str, unsigned int len)
 }
 
 static int
-output_text(struct proto *p, const char *fmt, va_list ap)
+output_text(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 {
-	unsigned char msgid;
 	unsigned int j;
 	const char *word;
 	const char *tfmt;
@@ -718,22 +717,14 @@ output_text(struct proto *p, const char *fmt, va_list ap)
 
 	outbuf_init(p);
 
-	/* The format string must start with %c for the msg ID */
-	while (*fmt == ' ') fmt++;
-	if (fmt[0] != '%' || fmt[1] != 'c')
-		return output_text_error(p, EINVAL,
-			"format string must start with %%c (%s)", fmt);
-	fmt += 2;
-	msgid = va_arg(ap, int);
-
 	/* Find the command/message structure */
 	for (j = 0; cmdtab[j].word; j++)
-		if (cmdtab[j].id == msgid)
+		if (cmdtab[j].id == msg)
 			break;
 	word = cmdtab[j].word;
 	if (!word)
 		return output_text_error(p, EINVAL,
-			"unknown command ID %02x", msgid);
+			"unknown command ID %02x", msg);
 
 	/* Send the command word first */
 	if (proto_outbuf(p, word, strlen(word)) == -1)
@@ -865,15 +856,15 @@ output_binary_error(struct proto *p, int err, const char *fmt, ...)
  * Returns number if iov, or -1 on error. */
 static int
 to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
+	char *work, size_t worksz,
 	const char *fmt, va_list ap)
 {
 	struct iovec *iov_start = iov;
 	char *str;
 	char f;
-	static char buf[5];
-	int buflen = 0;
-	char *lenp = NULL;
+	int worklen;
 
+	worklen = 0;
 	while ((f = *fmt++)) {
 		if (f == ' ')
 			continue;
@@ -884,9 +875,6 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 			errno = ENOMEM;
 			return -1;	/* too many % args */
 		}
-		if (iov == iov_start && *fmt != 'c')
-			return output_binary_error(p, EINVAL,
-				"expected %%c but got %%%c", *fmt);
 		switch (*fmt++) {
 		case '*':
 			if (*fmt++ != 's') abort();
@@ -901,21 +889,14 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 			iov++;
 			break;
 		case 'c':
-			if (buflen >= sizeof(buf)) {
+			if (worklen >= worksz) {
 				errno = ENOMEM;
 				return -1; /* too many %c */
 			}
-			buf[buflen] = va_arg(ap, int) & 0xff; /* promoted */
-			iov->iov_base = &buf[buflen];
-			if (iov == iov_start) {
-				/* Reserve space for the length bytes */
-				iov->iov_len = 3;
-				lenp = &buf[buflen + 1];
-				buflen += 3;
-			} else {
-				iov->iov_len = 1;
-				buflen++;
-			}
+			work[worklen] = va_arg(ap, int) & 0xff; /* promoted */
+			iov->iov_base = &work[worklen];
+			iov->iov_len = 1;
+			worklen++;
 			iov++;
 			break;
 		default:
@@ -923,50 +904,65 @@ to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 				"unknown format %%%c", *(fmt - 1));
 		}
 	}
-	if (iov == iov_start)
-		return output_binary_error(p, EINVAL, "empty format");
-	if (lenp) {
-		/* Calculate the total size */
-		size_t len = 0;
-		struct iovec *i;
-		// assert(iov_start->iov_len == 3);
-		for (i = iov_start + 1; i < iov; i++)
-			len += i->iov_len;
-		if (len > 0xffff) {
-			errno = ENOMEM;
-			return -1;
-		}
-		lenp[0] = (len >> 8) & 0xff;
-		lenp[1] = (len >> 0) & 0xff;
-	}
-
 	return iov - iov_start;
 }
 
+static size_t
+iov_size(const struct iovec *iov, int n)
+{
+	const struct iovec *i;
+	size_t sz = 0;
+
+	for (i = iov; n--; i++)
+		sz += i->iov_len;
+	return sz;
+}
+
 static int
-output_binary(struct proto *p, const char *fmt, va_list ap)
+output_binary(struct proto *p, unsigned char msg, const char *fmt,
+	va_list ap)
 {
 	struct iovec iov[10];
-	int niov = to_binary_iov(p, iov, 10, fmt, ap);
+	char work[16];
+	char tl[3];
+	size_t sz;
+
+	int niov = to_binary_iov(p, &iov[1], ARRAY_SIZE(iov) - 1,
+		work, sizeof work, fmt, ap);
 	if (niov < 0)
 		return -1;
+
+	/* Check that the data size is not excessive */
+	sz = iov_size(&iov[1], niov);
+	if (sz > 0xffff)
+		return output_binary_error(p, ENOMEM,
+			"packet too large, %zu", sz);
+
+	/* Build the three-byte binary header */
+	tl[0] = msg;
+	tl[1] = (sz >> 8) & 0xff;
+	tl[2] = (sz >> 0) & 0xff;
+	iov[0].iov_base = tl;
+	iov[0].iov_len = 3;
+
 	if (p->on_sendv)
-		return p->on_sendv(p, iov, niov);
+		return p->on_sendv(p, iov, niov + 1);
 	return 0;
 }
 
 static int
-output_framed(struct proto *p, const char *fmt, va_list ap)
+output_framed(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 {
 	struct iovec iov[10];
-	int niov = to_binary_iov(p, iov, 10, fmt, ap);
+	char work[16];
+	int niov = to_binary_iov(p, &iov[1], ARRAY_SIZE(iov) - 1,
+		work, sizeof work, fmt, ap);
 	if (niov < 0)
 		return -1;
-	/* Framed is just like binary except that we omit the
-	 * two length bytes. We do that by patching iov[0] */
+	iov[0].iov_base = &msg;
 	iov[0].iov_len = 1;
 	if (p->on_sendv)
-		return p->on_sendv(p, iov, niov);
+		return p->on_sendv(p, iov, niov + 1);
 	return 0;
 }
 
@@ -981,31 +977,32 @@ output_error(struct proto *p, int err, const char *fmt, ...)
 }
 
 int
-proto_outputv(struct proto *p, const char *fmt, va_list ap)
+proto_outputv(struct proto *p, unsigned char msg, const char *fmt,
+	va_list ap)
 {
 	if (p->mode == PROTO_MODE_UNKNOWN)
 		p->mode = PROTO_MODE_BINARY; /* prefer binary */
 
 	switch (p->mode) {
 	case  PROTO_MODE_BINARY:
-		return output_binary(p, fmt, ap);
+		return output_binary(p, msg, fmt, ap);
 	case PROTO_MODE_TEXT:
-		return output_text(p, fmt, ap);
+		return output_text(p, msg, fmt, ap);
 	case PROTO_MODE_FRAMED:
-		return output_framed(p, fmt, ap);
+		return output_framed(p, msg, fmt, ap);
 	default:
 		return output_error(p, EINVAL, "bad mode %d", p->mode);
 	}
 }
 
 int
-proto_output(struct proto *p, const char *fmt, ...)
+proto_output(struct proto *p, unsigned char msg, const char *fmt, ...)
 {
 	va_list ap;
 	int ret;
 
 	va_start(ap, fmt);
-	ret = proto_outputv(p, fmt, ap);
+	ret = proto_outputv(p, msg, fmt, ap);
 	va_end(ap);
 
 	return ret;

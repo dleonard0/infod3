@@ -52,23 +52,23 @@ struct proto;
  * (These could have been called 'request' and 'reply', but they weren't.)
  */
 
-#define CMD_HELLO		0x00	/* %c<id> [%s<text>] */
-#define CMD_SUB			0x01	/* %s<pattern> */
-#define CMD_UNSUB		0x02	/* %s<pattern> */
-#define CMD_GET			0x03	/* %s<key> */
-#define CMD_PUT			0x04	/* %s<key>
-					 | %s<key>%c<0>%*s<value>
-					 | %*s<key\0val> */
+#define CMD_HELLO		0x00	/* %c[%s], <id>[,<text>] */
+#define CMD_SUB			0x01	/* %s, <pattern> */
+#define CMD_UNSUB		0x02	/* %s, <pattern> */
+#define CMD_GET			0x03	/* %s, <key> */
+#define CMD_PUT			0x04	/* %s, <key>
+					 | %s%c%*s <key>,0,<value>
+					 | %*s     <key\0val> */
 #define CMD_BEGIN		0x05
 #define CMD_COMMIT		0x06
-#define CMD_PING		0x07	/* %s<id> */
+#define CMD_PING		0x07	/* %s, <id> */
 
-#define MSG_VERSION		0x80	/* %c<id> [%s<text>] */
-#define MSG_INFO		0x81	/* %s<key>
-					 | %s<key>%c<0>%*s<value>
-					 | %*s<key\0val> */
-#define MSG_PONG		0x82	/* "[%s]", [id] */
-#define MSG_ERROR		0x83	/* "%s" */
+#define MSG_VERSION		0x80	/* %c[%s], <id>[,<text>] */
+#define MSG_INFO		0x81	/* %s, <key>
+					 | %s%c%*s, <key>,0,<value>
+					 | %*s, <key\0val> */
+#define MSG_PONG		0x82	/* [%s], [id] */
+#define MSG_ERROR		0x83	/* %s, <humantext> */
 
 #define MSG_EOF			0xff	/* pseudo-message indicating close
                                          * i.e. proto_recv(netlen=0) */
@@ -116,14 +116,14 @@ void proto_set_on_input(struct proto *p,
  *     " "   - space characters (\040) are ignored
  *  No other formats or literal characters are permitted, and
  *  will result in EINVAL.
- *  The first format in fmt must be "%c" and supplies the
- *  message/command ID.
  *  Returns 0+ on success.
  *  Returns -1 on error (EINVAL, ENOMEM).
  */
-__attribute__((format(printf, 2, 3)))
-int proto_output(struct proto *p, const char *fmt, ...);
-int proto_outputv(struct proto *p, const char *fmt, va_list ap);
+_Pragma("GCC diagnostic ignored \"-Wformat-zero-length\"")
+__attribute__((format(printf, 3, 4)))
+int proto_output(struct proto *p, unsigned char msg, const char *fmt, ...);
+int proto_outputv(struct proto *p, unsigned char msg, const char *fmt,
+	va_list ap);
 
 struct iovec;
 

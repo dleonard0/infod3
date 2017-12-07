@@ -457,71 +457,68 @@ test_binary_proto()
 	assert_mock_on_input(p, MSG_ERROR, "error");
 
 	/* Exercise sending all of the message types [to net] */
-	assert(proto_output(p, "%c %c %s", CMD_HELLO, 0, "hello") != -1);
+	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
 	assert_mock_on_sendv(p, "\x00\0\6\0hello");
-	assert(proto_output(p, "%c %c", CMD_HELLO, 0) != -1);
+	assert(proto_output(p, CMD_HELLO, "%c", 0) != -1);
 	assert_mock_on_sendv(p, "\x00\0\1\0");
-	assert(proto_output(p, "%c %s", CMD_SUB, "*") != -1);
+	assert(proto_output(p, CMD_SUB, "%s", "*") != -1);
 	assert_mock_on_sendv(p, "\x01\0\1*");
-	assert(proto_output(p, "%c %s", CMD_UNSUB, "*") != -1);
+	assert(proto_output(p, CMD_UNSUB, "%s", "*") != -1);
 	assert_mock_on_sendv(p, "\x02\0\1*");
-	assert(proto_output(p, "%c %s", CMD_GET, "key") != -1);
+	assert(proto_output(p, CMD_GET, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "\x03\0\3key");
 
 	/* exercising CMD_PUT in its various ways [to net] */
-	assert(proto_output(p, "%c %s", CMD_PUT, "key") != -1);
+	assert(proto_output(p, CMD_PUT, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "\x04\0\3key");
-	assert(proto_output(p, "%c %s%c%s", CMD_PUT, "key", 0, "val") != -1);
+	assert(proto_output(p, CMD_PUT, "%s%c%s", "key", 0, "val") != -1);
 	assert_mock_on_sendv(p, "\x04\0\7key\0val");
-	assert(proto_output(p, "%c %*s%c%s", CMD_PUT, 3, "key", 0, "val") !=-1);
+	assert(proto_output(p, CMD_PUT, "%*s%c%s", 3, "key", 0, "val") !=-1);
 	assert_mock_on_sendv(p, "\x04\0\7key\0val");
-	assert(proto_output(p, "%c %*s", CMD_PUT, 7, "key\0val") != -1);
+	assert(proto_output(p, CMD_PUT, "%*s", 7, "key\0val") != -1);
 	assert_mock_on_sendv(p, "\x04\0\7key\0val");
-	assert(proto_output(p, "%c", CMD_BEGIN) != -1);
+	assert(proto_output(p, CMD_BEGIN, "") != -1);
 	assert_mock_on_sendv(p, "\x05\0\0");
-	assert(proto_output(p, "%c", CMD_COMMIT) != -1);
+	assert(proto_output(p, CMD_COMMIT, "") != -1);
 	assert_mock_on_sendv(p, "\x06\0\0");
-	assert(proto_output(p, "%c", CMD_PING) != -1);
+	assert(proto_output(p, CMD_PING, "") != -1);
 	assert_mock_on_sendv(p, "\x07\0\0");
-	assert(proto_output(p, "%c %s", CMD_PING, "abcd") != -1);
+	assert(proto_output(p, CMD_PING, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "\x07\0\4abcd");
 
-	assert(proto_output(p, "%c %c", MSG_VERSION, 9) != -1);
+	assert(proto_output(p, MSG_VERSION, "%c", 9) != -1);
 	assert_mock_on_sendv(p, "\x80\0\1\x9");
-	assert(proto_output(p, "%c %c %s", MSG_VERSION, 9, "") != -1);
+	assert(proto_output(p, MSG_VERSION, "%c %s", 9, "") != -1);
 	assert_mock_on_sendv(p, "\x80\0\1\x9");
-	assert(proto_output(p, "%c %c %s", MSG_VERSION, 9, "wxyz") != -1);
+	assert(proto_output(p, MSG_VERSION, "%c %s", 9, "wxyz") != -1);
 	assert_mock_on_sendv(p, "\x80\0\5\x9wxyz");
-	assert(proto_output(p, "%c %s", MSG_INFO, "key") != -1);
+	assert(proto_output(p, MSG_INFO, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "\x81\0\3key");
-	assert(proto_output(p, "%c %*s", MSG_INFO, 10, "key\0val\0ue") != -1);
+	assert(proto_output(p, MSG_INFO, "%*s", 10, "key\0val\0ue") != -1);
 	assert_mock_on_sendv(p, "\x81\0\012key\0val\0ue");
-	assert(proto_output(p, "%c %s%c%*s",MSG_INFO,"key",0,6,"val\0ue")!=-1);
+	assert(proto_output(p, MSG_INFO, "%s%c%*s", "key", 0,6,"val\0ue")!=-1);
 	assert_mock_on_sendv(p, "\x81\0\012key\0val\0ue");
-	assert(proto_output(p, "%c", MSG_PONG) != -1);
+	assert(proto_output(p, MSG_PONG, "") != -1);
 	assert_mock_on_sendv(p, "\x82\0\0");
-	assert(proto_output(p, "%c %s", MSG_PONG, "abcd") != -1);
+	assert(proto_output(p, MSG_PONG, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "\x82\0\4abcd");
-	assert(proto_output(p, "%c %s", MSG_ERROR, "abcd") != -1);
+	assert(proto_output(p, MSG_ERROR, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "\x83\0\4abcd");
 
 	/* Exercise some malformed formats [to net] */
-	assert(proto_output(p, " ") == -1);
+	assert(proto_output(p, 0, "%%") == -1);
 	assert_no_mock_on_sendv();
 	assert_mock_on_error_called(p);
-	assert(proto_output(p, "%%") == -1);
+	assert(proto_output(p, 0, "%x", 1) == -1);
 	assert_no_mock_on_sendv();
 	assert_mock_on_error_called(p);
-	assert(proto_output(p, "%x", 1) == -1);
+	assert(proto_output(p, 0, "x") == -1);
 	assert_no_mock_on_sendv();
 	assert_mock_on_error_called(p);
-	assert(proto_output(p, "x") == -1);
+	assert(proto_output(p, 0 ,"%*s", 0x20000, "") == -1);
 	assert_no_mock_on_sendv();
 	assert_mock_on_error_called(p);
-	assert(proto_output(p, "%*s", 0x20000, "") == -1);
-	assert_no_mock_on_sendv();
-	assert_mock_on_error_called(p);
-	assert(proto_output(p, "%c %*s", 1, 0x20000, "") == -1);
+	assert(proto_output(p, 0, "%c %*s", 1, 0x20000, "") == -1);
 	assert(errno == ENOMEM);
 	assert_no_mock_on_sendv();
 	mock_on_error_clear();
@@ -599,7 +596,7 @@ test_text_proto()
 	/* Exercise encoding in text [to net].
 	 * (This relies on the proto receiving one text message
 	 * earlier, otherwise it would be in binary mode) */
-	assert(proto_output(p, "%c %c %s", CMD_HELLO, 0, "hello") != -1);
+	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
 	assert_mock_on_sendv(p, "HELLO 0 hello\r\n");
 
 	/* Exercise recv other messages [from net] */
@@ -657,57 +654,57 @@ test_text_proto()
 
 
 	/* Exercise sensing messages to the net */
-	assert(proto_output(p, "%c %c %s", CMD_HELLO, 0, "hello") != -1);
+	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
 	assert_mock_on_sendv(p, "HELLO 0 hello\r\n");
-	assert(proto_output(p, "%c %c", CMD_HELLO, 0) != -1);
+	assert(proto_output(p, CMD_HELLO, "%c", 0) != -1);
 	assert_mock_on_sendv(p, "HELLO 0\r\n");
-	assert(proto_output(p, "%c %s", CMD_SUB, "*") != -1);
+	assert(proto_output(p, CMD_SUB, "%s", "*") != -1);
 	assert_mock_on_sendv(p, "SUB *\r\n");
-	assert(proto_output(p, "%c %s", CMD_UNSUB, "*") != -1);
+	assert(proto_output(p, CMD_UNSUB, "%s", "*") != -1);
 	assert_mock_on_sendv(p, "UNSUB *\r\n");
-	assert(proto_output(p, "%c %s", CMD_GET, "key") != -1);
+	assert(proto_output(p, CMD_GET, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "GET key\r\n");
 
 	/* exercising CMD_PUT in its various ways [to net] */
-	assert(proto_output(p, "%c %s", CMD_PUT, "key") != -1);
+	assert(proto_output(p, CMD_PUT, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "PUT key\r\n");
-	assert(proto_output(p, "%c %s%c%s", CMD_PUT, "key", 0, "val") != -1);
+	assert(proto_output(p, CMD_PUT, "%s%c%s", "key", 0, "val") != -1);
 	assert_mock_on_sendv(p, "PUT key val\r\n");
-	assert(proto_output(p, "%c %*s%c%s", CMD_PUT, 3, "key", 0, "val") !=-1);
+	assert(proto_output(p, CMD_PUT, "%*s%c%s", 3, "key", 0, "val") !=-1);
 	assert_mock_on_sendv(p, "PUT key val\r\n");
-	assert(proto_output(p, "%c %*s", CMD_PUT, 7, "key\0val") != -1);
+	assert(proto_output(p, CMD_PUT, "%*s", 7, "key\0val") != -1);
 	assert_mock_on_sendv(p, "PUT key val\r\n");
-	assert(proto_output(p, "%c", CMD_BEGIN) != -1);
+	assert(proto_output(p, CMD_BEGIN, "") != -1);
 	assert_mock_on_sendv(p, "BEGIN\r\n");
-	assert(proto_output(p, "%c", CMD_COMMIT) != -1);
+	assert(proto_output(p, CMD_COMMIT, "") != -1);
 	assert_mock_on_sendv(p, "COMMIT\r\n");
-	assert(proto_output(p, "%c", CMD_PING) != -1);
+	assert(proto_output(p, CMD_PING, "") != -1);
 	assert_mock_on_sendv(p, "PING\r\n");
-	assert(proto_output(p, "%c %s", CMD_PING, "abcd") != -1);
+	assert(proto_output(p, CMD_PING, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "PING abcd\r\n");
 
-	assert(proto_output(p, "%c %c", MSG_VERSION, 9) != -1);
+	assert(proto_output(p, MSG_VERSION, "%c", 9) != -1);
 	assert_mock_on_sendv(p, "VERSION 9\r\n");
-	assert(proto_output(p, "%c %c %s", MSG_VERSION, 9, "") != -1);
+	assert(proto_output(p, MSG_VERSION, "%c %s", 9, "") != -1);
 	assert_mock_on_sendv(p, "VERSION 9 \"\"\r\n");
-	assert(proto_output(p, "%c %c %s", MSG_VERSION, 9, "wxyz") != -1);
+	assert(proto_output(p, MSG_VERSION, "%c %s", 9, "wxyz") != -1);
 	assert_mock_on_sendv(p, "VERSION 9 wxyz\r\n");
-	assert(proto_output(p, "%c %s", MSG_INFO, "key") != -1);
+	assert(proto_output(p, MSG_INFO, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "INFO key\r\n");
-	assert(proto_output(p, "%c %*s", MSG_INFO, 10, "key\0val\nue") != -1);
+	assert(proto_output(p, MSG_INFO, "%*s", 10, "key\0val\nue") != -1);
 	assert_mock_on_sendv(p, "INFO key \"val\\012ue\"\r\n");
-	assert(proto_output(p, "%c %s%c%*s",MSG_INFO,"key",0,6,"val\nue")!=-1);
+	assert(proto_output(p, MSG_INFO, "%s%c%*s", "key",0,6,"val\nue")!=-1);
 	assert_mock_on_sendv(p, "INFO key \"val\\012ue\"\r\n");
-	assert(proto_output(p, "%c", MSG_PONG) != -1);
+	assert(proto_output(p, MSG_PONG, "") != -1);
 	assert_mock_on_sendv(p, "PONG\r\n");
-	assert(proto_output(p, "%c %s", MSG_PONG, "abcd") != -1);
+	assert(proto_output(p, MSG_PONG, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "PONG abcd\r\n");
-	assert(proto_output(p, "%c %s", MSG_ERROR, "abcd") != -1);
+	assert(proto_output(p, MSG_ERROR, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "ERROR abcd\r\n");
 
 	/* Test sending the largest string possible */
 	assert(sizeof Mega >= 0xffff);
-	assert(proto_output(p, "%c %*s", MSG_ERROR, 0xffff, Mega) != -1);
+	assert(proto_output(p, MSG_ERROR, "%*s", 0xffff, Mega) != -1);
 	assert(mock_on_sendv.counter > 0);
 	assert(mock_on_sendv.datalen ==
 		strlen("ERROR ") + 0xffff + strlen("\r\n"));
@@ -715,18 +712,16 @@ test_text_proto()
 	mock_on_sendv_clear();
 
 	/* Exercise some malformed formats [to net] */
-	assert(proto_output(p, " ") == -1);
+	assert(proto_output(p, 0, "%%") == -1);
 	assert_no_mock_on_sendv();
-	assert(proto_output(p, "%%") == -1);
+	assert(proto_output(p, 0, "%x", 1) == -1);
 	assert_no_mock_on_sendv();
-	assert(proto_output(p, "%x", 1) == -1);
-	assert_no_mock_on_sendv();
-	assert(proto_output(p, "x") == -1);
+	assert(proto_output(p, 0, "x") == -1);
 	assert_no_mock_on_sendv();
 
-	assert(proto_output(p, "%*s", MEGA_SIZE, Mega) == -1);
+	assert(proto_output(p, 0, "%*s", MEGA_SIZE, Mega) == -1);
 	assert_no_mock_on_sendv();
-	assert(proto_output(p, "%c %*s", 1, MEGA_SIZE, Mega) == -1);
+	assert(proto_output(p, 0, "%c %*s", 1, MEGA_SIZE, Mega) == -1);
 	assert_no_mock_on_sendv();
 
 	/* Test returning an unrecoverable error from on_input() */
@@ -764,11 +759,11 @@ test_framed_proto()
 	assert(proto_get_mode(p) == PROTO_MODE_FRAMED);
 	assert_mock_on_input(p, CMD_HELLO, "\0");
 
-	assert(proto_output(p, "%c %c %s", CMD_HELLO, 0, "hello") != -1);
+	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
 	assert_mock_on_sendv(p, "\x00\0hello");
 
 	/* Test sending and receiving the largest units */
-	assert(proto_output(p, "%c %*s", MSG_ERROR, 0xffff, Mega) != -1);
+	assert(proto_output(p, MSG_ERROR, "%*s", 0xffff, Mega) != -1);
 	assert(mock_on_sendv.counter > 0);
 	assert(mock_on_sendv.datalen == 1 + 0xffff);
 	assert(memcmp(mock_on_sendv.data + 1, Mega, 0xffff) == 0);
