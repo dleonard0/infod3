@@ -99,8 +99,8 @@ client_free(struct client *client)
 	struct subscription *sub;
 	struct bufcmd *bcmd;
 
-	/* invoked by proto's udata_free */
-	assert(!client->proto);
+	proto_free(client->proto);
+
 	while ((sub = client->subs)) {
 		REMOVE(sub);
 		subscription_free(sub);
@@ -111,12 +111,6 @@ client_free(struct client *client)
 	}
 
 	free(client);
-}
-
-static void
-client_free_udata(void *udata)
-{
-	client_free(udata);
 }
 
 static struct client *
@@ -143,7 +137,9 @@ client_new(int fd)
 	client->bufcmds = NULL;
 	client->nbufcmds = 0;
 
-	proto_set_udata(proto, client, client_free_udata);
+	/* We don't use a udata free function, because
+	 * the client owns the proto, not vice versa. */
+	proto_set_udata(proto, client, NULL);
 
 	INSERT(client, all_clients);
 	return client;
@@ -165,9 +161,7 @@ static void
 on_net_close(struct server *s, void *c)
 {
 	struct client *client = c;
-	if (client)
-		client->proto = NULL;
-	/* Eventually udata_free() will invoke client_free() */
+	client_free(client);
 }
 
 static void
@@ -264,6 +258,7 @@ on_app_input(struct proto *p, unsigned char msg,
 	struct subscription *sub;
 	struct info *info;
 	struct index *index;
+	int ret;
 
 	if (msg == MSG_EOF)
 		return 0;
@@ -296,6 +291,7 @@ on_app_input(struct proto *p, unsigned char msg,
 				if (proto_output(p, MSG_INFO, "%*s",
 				    info->sz, info->keyvalue) == -1)
 					return -1;
+		index_close(index);
 		return 1;
 	case CMD_UNSUB:
 		sub = client_find_subscription(client, data, datalen);
@@ -307,23 +303,42 @@ on_app_input(struct proto *p, unsigned char msg,
 		return 1;
 	case CMD_GET:
 		if (contains_nul(data, datalen))
-			return proto_output(p, MSG_ERROR,
+			return proto_output(p, MSG_ERROR, "%s",
 				"get: invalid key");
 		info = store_get(the_store, data);
 		if (!info)
 			return proto_output(p, MSG_INFO, "%s%c", data, 0);
-		return proto_output(p, MSG_INFO, "%*s", info->sz,
+		ret = proto_output(p, MSG_INFO, "%*s", info->sz,
 			info->keyvalue);
+		info_decref(info);
+		return ret;
 	case CMD_PUT:
-		if (!contains_nul(data, datalen))
-			return proto_output(p, MSG_ERROR,
-				"put: missing value");
-		/* check if same value already */
-		info = store_get(the_store, data);
-		if (info &&
-		    info->sz == datalen &&
-		    memcmp(data, info->keyvalue, datalen) == 0)
-			return 1; /* no change */
+		if (!contains_nul(data, datalen)) {
+			/* delete check if already deleted */
+			info = store_get(the_store, data);
+			if (!info)
+				return 1;
+			store_del(the_store, info);
+			info_decref(info);
+		} else {
+			/* check if same value already */
+			info = store_get(the_store, data);
+			if (info &&
+			    info->sz == datalen &&
+			    memcmp(data, info->keyvalue, datalen) == 0)
+			{
+				info_decref(info);
+				return 1; /* no change */
+			}
+			info = info_new(datalen);
+			if (!info)
+				return proto_output(p, MSG_ERROR, "%s%s",
+					"put: ", strerror(errno));
+			memcpy(info->keyvalue, data, datalen);
+			if (store_put(the_store, info) == -1)
+				return proto_output(p, MSG_ERROR, "%s%s",
+					"put: ", strerror(errno));
+		}
 		/* notify all subscribers */
 		for (c = all_clients; c; c = NEXT(c))
 			for (sub = c->subs; sub; sub = NEXT(sub))
