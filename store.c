@@ -121,7 +121,7 @@ store_put(struct store *store, struct info *info)
 		info_decref(store->info[i]);
 	} else {
 		if (store_insert(store, i) == -1) {
-			/* Don't info_decref(info); */
+			info_decref(info);
 			return -1;
 		}
 	}
@@ -204,7 +204,6 @@ index_seek(struct index *index, const char *key)
 	i = store_find(index->store, key);
 	info = i < n ? store->info[i] : NULL;
 	info_incref(info); /* for the index */
-	info_incref(info); /* for the caller */
 	info_decref(prev);
 	index->i = i;
 	index->prev = info;
@@ -249,7 +248,6 @@ index_next(struct index *index)
 	index->prev = info;
 	index->i = i;
 	info_incref(info); /* for the index */
-	info_incref(info); /* for the caller */
 	info_decref(prev);
 	return info;
 }

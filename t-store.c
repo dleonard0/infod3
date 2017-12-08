@@ -58,10 +58,10 @@ test_store(struct store *store, struct info **sorted_info,
 	assert(index);
 	for (i = sorted_info; *i; i++) {
 		found = index_next(index);
-		if (found != *i) fprintf(stderr, "i = \"%s\"\n", (*i)->keyvalue);
+		if (found != *i)
+			fprintf(stderr, "i = \"%s\"\n", (*i)->keyvalue);
 		assert(found);
 		assert(found == *i);
-		info_decref(found);
 	}
 	assert(!index_next(index));
 	index_close(index);
@@ -91,8 +91,10 @@ test_index_changing(struct store *store, const char *keyvalue, uint16_t sz)
 	/* can index over the whole store */
 	index = index_open(store);
 	assert(index);
-	while ((info = index_next(index)))
+	while ((info = index_next(index))) {
 		content[n++] = info;
+		info_incref(info);
+	}
 	index_close(index);
 
 	/* At each position in the store 0..n insert a new info
@@ -134,6 +136,7 @@ test_index_changing(struct store *store, const char *keyvalue, uint16_t sz)
 						last->keyvalue, info->keyvalue);
 				assert(strcmp(last->keyvalue, info->keyvalue)<0);
 			}
+			info_incref(info);
 			info_decref(last);
 			last = info;
 		}
@@ -178,6 +181,7 @@ test_index_changing(struct store *store, const char *keyvalue, uint16_t sz)
 						last->keyvalue, info->keyvalue);
 				assert(strcmp(last->keyvalue, info->keyvalue)<0);
 			}
+			info_incref(info);
 			info_decref(last);
 			last = info;
 		}
