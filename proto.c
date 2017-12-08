@@ -687,7 +687,7 @@ output_text_error(struct proto *p, int err, const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	proto_errorv(p, err, "proto_output{text}", fmt, ap);
+	proto_errorv(p, err, "proto_output() text", fmt, ap);
 	va_end(ap);
 	(void)outbuf_cancel(p);
 	return -1;
@@ -699,7 +699,7 @@ output_text_string(struct proto *p, const char *str, unsigned int len)
 {
 	if (len > 0xffff)
 		return output_text_error(p, EINVAL,
-			"string too big, %u > %u", len, 0xffff);
+			"string too big, len %u > %u", len, 0xffff);
 	if (len == 0 ||
 	    str[0] == '"' ||
 	    memchr(str, ' ', len) ||
@@ -742,6 +742,8 @@ output_text(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 	int len;
 	const char *str;
 	char *nulpos;
+	int star;
+	const char *ofmt = fmt;
 
 	outbuf_init(p);
 
@@ -752,7 +754,7 @@ output_text(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 	word = cmdtab[j].word;
 	if (!word)
 		return output_text_error(p, EINVAL,
-			"unknown command ID %02x", msg);
+			"unknown msg 0x%02x", msg);
 
 	/* Send the command word first */
 	if (proto_outbuf(p, word, strlen(word)) == -1)
@@ -764,11 +766,12 @@ output_text(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 		char f, t;
 
 		f = *fmt++;
-		if (f == ' ') continue;
+		if (f == ' ')
+			continue;
 		if (f != '%')
 			return output_text_error(p, EINVAL,
-				"%s: unexpected char in format: '%c'",
-				word,f);
+				"%s/%s: unexpected '%c' in fmt",
+				word, ofmt, f);
 		f = *fmt++;
 
 		t = *tfmt++;
@@ -785,12 +788,13 @@ output_text(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 		switch (t) {
 		case '\0':
 			return output_text_error(p, EINVAL,
-				"%s: excess format %%%c can't be matched",
-				word, f);
+				"%s/%s: can't match %%%c against tfmt '%s'",
+				word, ofmt, f, cmdtab[j].fmt);
 		case 'i':
 			if (f != 'c')
 				return output_text_error(p, EINVAL,
-					"%s: expected %%c, got %%%c", word, f);
+					"%s/%s: expected %%c not %%%c for '%s'",
+					word, ofmt, f, cmdtab[j].fmt);
 			ch = va_arg(ap, int);
 			len = snprintf(ibuf, sizeof ibuf, "%u", ch & 0xff);
 			if (proto_outbuf(p, ibuf, len) == -1)
@@ -799,42 +803,41 @@ output_text(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 		case '0':
 			if (f != 'c')
 				return output_text_error(p, EINVAL,
-					"%s: expected %%c, got %%%c", word, f);
+					"%s/%s: expected %%c not %%%c for '%s'",
+					word, ofmt, f, cmdtab[j].fmt);
 			ch = va_arg(ap, int);
 			if (ch != 0)
 				return output_text_error(p, EINVAL,
-					"%s: expected 0 for %%c, got %d",
-					word, ch);
+					"%s/%s: expected 0 for %%c, got %d",
+					word, ofmt, ch);
 			/* no need to emit anything here */
 			break;
 		case 't':
-			if (f == 's') { /* got %s */
+			if ((star = (f == '*')))
+				f = *fmt++;
+			if (f != 's')
+				return output_text_error(p, EINVAL,
+					"%s/%s: expected %%s not %%%c for '%s'",
+					word, ofmt, f, cmdtab[j].fmt);
+
+			if (star) {
+				len = va_arg(ap, int);
 				str = va_arg(ap, char *);
-				if (!str)
-					return output_text_error(p,
-						EINVAL, "%s: got NULL for %%s",
-						word);
+			} else {
+				str = va_arg(ap, char *);
 				len = strlen(str);
 				if (output_text_string(p, str, len) == -1)
 					return -1;
 				break;
 			}
-			if (f != '*')
-				return output_text_error(p, EINVAL,
-					"%s: unexpected %%%c for text",
-					word, f);
-			f = *fmt++;
-			if (f != 's')
-				return output_text_error(p, EINVAL,
-					"%s: unexpected %%*%c for text",
-					word, f);
-			len = va_arg(ap, int);
-			str = va_arg(ap, char *);
+
+			while (*fmt == ' ')
+				fmt++;
+
 			/* The sequence '...t|0t' can be satisfied by %*s,
 			 * but only when the data contains a NUL */
-			if (strcmp(tfmt, "|0t") == 0 &&
-			    !*fmt &&
-			    (nulpos = memchr(str, 0, len)))
+			if (star && strcmp(tfmt, "|0t") == 0 &&
+			    !*fmt && (nulpos = memchr(str, 0, len)))
 			{
 				if (output_text_string(p, str,
 				    nulpos - str) == -1)
@@ -854,7 +857,8 @@ output_text(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 	}
 	if (!optional && *tfmt && *tfmt != '|')
 		return output_text_error(p, EINVAL,
-			"%s: missing required argument (%c)", word, *tfmt);
+			"%s/%s: missing arguments for '%s'",
+			word, ofmt, cmdtab[j].fmt);
 	if (proto_outbuf(p, "\r\n", 2) == -1)
 		return -1;
 	return outbuf_flush(p);
@@ -873,7 +877,7 @@ output_binary_error(struct proto *p, int err, const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	proto_errorv(p, err, "proto_output{binary}", fmt, ap);
+	proto_errorv(p, err, "proto_output() binary", fmt, ap);
 	va_end(ap);
 	return -1;
 }
