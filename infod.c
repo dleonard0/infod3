@@ -323,13 +323,11 @@ on_app_input(struct proto *p, unsigned char msg,
 		} else {
 			/* check if same value already */
 			info = store_get(the_store, data);
+			info_decref(info);
 			if (info &&
 			    info->sz == datalen &&
 			    memcmp(data, info->keyvalue, datalen) == 0)
-			{
-				info_decref(info);
 				return 1; /* no change */
-			}
 			info = info_new(datalen);
 			if (!info)
 				return proto_output(p, MSG_ERROR, "%s%s",
