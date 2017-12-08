@@ -245,7 +245,7 @@ buffer_command(struct client *client, unsigned char msg,
 	if (!bcmd)
 		return proto_output(p, MSG_ERROR, "%s%s",
 			"begin: ", strerror(errno));
-	INSERT(*client->bufcmd_tail, client->bufcmds);
+	APPEND(bcmd, client->bufcmd_tail);
 	return 1;
 }
 

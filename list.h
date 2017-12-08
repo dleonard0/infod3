@@ -14,6 +14,13 @@
 	(head) = (p); \
     } while (0)
 
+/* Append unlinked p at tail pointer.
+ * The tail pointer is not updated when the tail is REMOVEd! */
+#define APPEND(p, tail) do { \
+	INSERT(p, *(tail)); \
+	(tail) = &(p)->next; \
+    } while (0)
+
 /* Remove a linked p, leaving it unlinked. */
 #define REMOVE(p) do { \
 	if ((p)->next) (p)->next->prevp = (p)->prevp; \
