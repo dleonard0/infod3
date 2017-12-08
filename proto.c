@@ -403,6 +403,7 @@ again:
 			if (t->cmdlen >= sizeof t->cmd) {
 				proto_output_error(p, "long command");
 				t->state = T_ERROR;
+				goto again;
 			}
 			break;
 		}
@@ -414,7 +415,7 @@ again:
 		if (!cmdtab[i].word) {
 			proto_output_error(p, "unknown command '%s'", t->cmd);
 			t->state = T_ERROR;
-			break;
+			goto again;
 		}
 		/* store command ID at front of rxbuf */
 		if (rxbuf_clear(&p->rx, 1) == -1)
@@ -450,6 +451,7 @@ again:
 		} else if (!*t->fmt) {
 			proto_output_error(p, "unexpected arg for '%s'", t->cmd);
 			t->state = T_ERROR;
+			goto again;
 		} else {
 			/* At this point all leading space has been skipped,
 			 * so we jump to the next state immediately */
@@ -473,6 +475,7 @@ again:
 			if (t->intval > 255) {
 				proto_output_error(p, "integer overflow");
 				t->state = T_ERROR;
+				goto again;
 			}
 			break;
 		}
