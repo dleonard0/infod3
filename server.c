@@ -22,7 +22,8 @@ struct server {
 	unsigned int n;				/* active connections */
 	unsigned int nmax;			/* sz of socket[], pollfd[] */
 	struct server_socket {
-		void *data;
+		void *data;			/* NULL when listener */
+		struct listener *listener;
 		int is_listener;
 	} *socket;
 	struct pollfd *pollfd;			/* parallel to socket[] */
@@ -53,6 +54,16 @@ is_listener(const struct server *server, int i)
 {
 	// assert(i < sockets.n);
 	return server->socket[i].is_listener;
+}
+
+static const char *
+listener_peername(struct listener *listener, int fd, char *buf, size_t sz)
+{
+	if (fd == -1)
+		return "closed";
+	if (!listener || !listener->peername)
+		return "?";
+	return listener->peername(fd, buf, sz);
 }
 
 /* Enable/disable all listening sockets.
@@ -158,13 +169,21 @@ server_del_socket(struct server *server, unsigned int i)
 	unsigned int last = server->n - 1;
 	struct server_socket *socket = &server->socket[i];
 	unsigned int max_sockets = server->context->max_sockets;
+	char namebuf[256];
 
 	assert(!is_listener(server, i));
 
-	if (close(server->pollfd[i].fd) == -1)
-		on_error(server, "close: %s", strerror(errno));
+	if (close(server->pollfd[i].fd) == -1) {
+		int e = errno;
+		on_error(server, "[%s] close: %s",
+			listener_peername(socket->listener,
+				server->pollfd[i].fd,
+				namebuf, sizeof namebuf),
+			strerror(e));
+	}
 	if (server->context->on_close)
-		server->context->on_close(server, socket->data);
+		server->context->on_close(server, socket->data,
+			socket->listener);
 
 	/* Maintain the list packing */
 	if (i < last) {
@@ -183,24 +202,32 @@ server_del_socket(struct server *server, unsigned int i)
 
 /* accept a new connection and create a new socket */
 static void
-server_accept(struct server *server, int listen_fd, void *listener_data)
+server_accept(struct server *server, int listen_fd, struct listener *listener)
 {
 	int fd;
 
 	fd = accept(listen_fd, NULL, NULL);
 	if (fd == -1) {
-		on_error(server, "accept: %s", strerror(errno));
+		on_error(server, "[%s] accept: %s",
+			listener ? listener->name : "(null)",
+			strerror(errno));
 		return;
 	}
 
-	if (server_add_fd(server, fd, listener_data) == -1) {
-		if (close(fd) == -1)
-			on_error(server, "server_add_fd: %s", strerror(errno));
+	if (server_add_fd(server, fd, listener) == -1) {
+		if (close(fd) == -1) {
+			char namebuf[256];
+			int e = errno;
+			on_error(server, "[%s] close: %s",
+				listener_peername(listener, fd,
+					namebuf, sizeof namebuf),
+				strerror(e));
+		}
 	}
 }
 
 int
-server_add_fd(struct server *server, int fd, void *listener_data)
+server_add_fd(struct server *server, int fd, struct listener *listener)
 {
 	int i;
 	void *data;
@@ -210,11 +237,12 @@ server_add_fd(struct server *server, int fd, void *listener_data)
 		return -1;
 
 	if (server->context->on_accept) {
-		data = server->context->on_accept(server, fd, listener_data);
+		data = server->context->on_accept(server, fd, listener);
 		/* Anything may have happened in upcall; scan for fd */
 		for (i = 0; i < server->n; i++)
 			if (server->pollfd[i].fd == fd) {
 				server->socket[i].data = data;
+				server->socket[i].listener = listener;
 				break;
 			}
 	}
@@ -253,7 +281,7 @@ server_poll(struct server *server, int timeout)
 		/* handle connection on a listner socket */
 		if (is_listener(server, i)) {
 			server_accept(server, server->pollfd[i].fd,
-				server->socket[i].data);
+				server->socket[i].listener);
 			i++;
 			continue;
 		}
@@ -264,8 +292,16 @@ server_poll(struct server *server, int timeout)
 		if (len > 0)
 			i++;
 		else {
-			if (len == -1)
-				on_error(server, "read: %s", strerror(errno));
+			if (len == -1) {
+				int e = errno;
+				char namebuf[256];
+				on_error(server, "[%s] on_ready: %s",
+					listener_peername(
+						server->socket[i].listener,
+						server->pollfd[i].fd,
+						namebuf, sizeof namebuf),
+					strerror(e));
+			}
 			server_del_socket(server, i);
 		}
 	}
@@ -300,7 +336,8 @@ server_free(struct server *server)
 			close(server->pollfd[i].fd);
 			if (server->context->on_close)
 				server->context->on_close(server,
-					server->socket[i].data);
+					server->socket[i].data,
+					server->socket[i].listener);
 		}
 	}
 
@@ -310,7 +347,7 @@ server_free(struct server *server)
 			close(server->pollfd[i].fd);
 			if (server->context->on_listener_close)
 				server->context->on_listener_close(server,
-					server->socket[i].data);
+					server->socket[i].listener);
 		}
 	}
 
@@ -320,7 +357,7 @@ server_free(struct server *server)
 }
 
 int
-server_add_listener(struct server *server, int fd, void *listener)
+server_add_listener(struct server *server, int fd, struct listener *listener)
 {
 	int i;
 
@@ -328,7 +365,8 @@ server_add_listener(struct server *server, int fd, void *listener)
 	if (i < 0)
 		return -1;
 	server->socket[i].is_listener = 1;
-	server->socket[i].data = listener;
+	server->socket[i].data = NULL;
+	server->socket[i].listener = listener;
 	return 0;
 }
 

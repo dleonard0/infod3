@@ -127,7 +127,7 @@ static struct {
 	void *retval;
 } mock_on_accept;
 static void *
-mock_on_accept_fn(struct server *s, int fd, void *listener)
+mock_on_accept_fn(struct server *s, int fd, struct listener *listener)
 {
 	mock_on_accept.counter++;
 	mock_on_accept.s = s;
@@ -160,22 +160,24 @@ static struct mock_on_close {
 	unsigned int counter;
 	struct server *s;
 	void *client;
+	struct listener *listener;
 } mock_on_close;
 static void
-mock_on_close_fn(struct server *s, void *client)
+mock_on_close_fn(struct server *s, void *client, struct listener *listener)
 {
 	mock_on_close.counter++;
 	mock_on_close.s = s;
 	mock_on_close.client = client;
+	mock_on_close.listener = listener;
 }
 
 static struct mock_on_listener_close {
 	unsigned int counter;
 	struct server *s;
-	void *listener;
+	struct listener *listener;
 } mock_on_listener_close;
 static void
-mock_on_listener_close_fn(struct server *s, void *listener)
+mock_on_listener_close_fn(struct server *s, struct listener *listener)
 {
 	mock_on_listener_close.counter++;
 	mock_on_listener_close.s = s;
@@ -198,6 +200,13 @@ mock_on_error_fn(struct server *s, const char *msg)
 	snprintf(mock_on_error.msg, sizeof mock_on_error.msg, "%s", msg);
 }
 
+static const char *
+LISTEN_peername(int fd, char *buf, size_t sz)
+{
+	snprintf(buf, sz, "%d", fd);
+	return buf;
+}
+
 int
 main()
 {
@@ -206,7 +215,7 @@ main()
 	int client_fd;			/* client fd as known to the server */
 	struct server *server;
 	struct server_context context;
-	static char LISTEN[] = "LISTEN";
+	static struct listener LISTEN = { "LISTEN", LISTEN_peername };
 	static char CLIENT[] = "CLIENT";
 	char discard;
 
@@ -230,7 +239,7 @@ main()
 
 	/* can attach a listener socket */
 	listenfd = listen_local();
-	CHECK(server_add_listener(server, listenfd, LISTEN));
+	CHECK(server_add_listener(server, listenfd, &LISTEN));
 	assert(CHECK(server_poll(server, 0)) == 0);
 
 	/* Private connection to the (only) listener, to trigger an accept */
@@ -242,7 +251,7 @@ main()
 	/* the accept callback should have happened */
 	assert(WAS_CALLED(mock_on_accept));
 	assert(mock_on_accept.s == server);
-	assert(mock_on_accept.listener == LISTEN);
+	assert(mock_on_accept.listener == &LISTEN);
 	assert(mock_on_accept.fd != -1);
 	assert(mock_on_accept.fd != listenfd);
 	client_fd = mock_on_accept.fd;
@@ -277,7 +286,7 @@ main()
 	mock_on_accept.retval = CLIENT;
 	assert(CHECK(server_poll(server, 0)) == 1);
 	assert(WAS_CALLED(mock_on_accept));
-	assert(mock_on_accept.listener == LISTEN);
+	assert(mock_on_accept.listener == &LISTEN);
 	client_fd = mock_on_accept.fd;
 	assert(CHECK(server_poll(server, 0)) == 0);
 	/* we can shut down the inside fd */
@@ -311,5 +320,5 @@ main()
 	server_free(server);
 	assert(WAS_CALLED(mock_on_listener_close));
 	assert(mock_on_listener_close.s == server);
-	assert(mock_on_listener_close.listener == LISTEN);
+	assert(mock_on_listener_close.listener == &LISTEN);
 }

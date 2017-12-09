@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <errno.h>
+#include <syslog.h>
 
 #include <sys/uio.h>
 
@@ -22,17 +23,20 @@
 #define MAX_SUBS	16
 #define MAX_BUFCMDS	32
 
-static struct store *the_store;
+static struct options {
+	unsigned char verbose;
+	unsigned char syslog;
+} options;
 
-struct listener {
-	void *_todo;
-};
+/* Single store */
+static struct store *the_store;
 
 /* Client connections */
 struct client {
 	LINK(struct client);
 	int fd;
 	struct proto *proto;
+
 	unsigned int nsubs;
 	unsigned int nbufcmds;
 	unsigned int begins;
@@ -51,10 +55,44 @@ struct client {
 		unsigned char msg;
 		char data[];
 	} *bufcmds, **bufcmd_tail;
+
 } *all_clients;
 
 static int on_app_input(struct proto *p, unsigned char msg,
 	 const char *data, unsigned int datalen);
+
+static void
+log_msg(int level, const char *msg)
+{
+	if (options.syslog)
+		syslog(level, "%s", msg);
+	fprintf(stderr, "%s\n", msg);
+}
+
+static void
+log_msgf(int level, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	if (options.syslog) {
+		va_list ap2;
+		va_copy(ap2, ap);
+		vsyslog(level, fmt, ap2);
+		va_end(ap2);
+	}
+	fprintf(stderr, fmt, ap);
+	fputc('\n', stderr);
+	va_end(ap);
+}
+
+static void
+log_perror(const char *msg)
+{
+	const char *estr = strerror(errno);
+	if (options.syslog)
+		syslog(LOG_ERR, "%s: %s", msg, estr);
+	fprintf(stderr, "%s: %s\n", msg, estr);
+}
 
 struct subscription *
 subscription_new(const char *pattern, unsigned int pattern_len)
@@ -158,7 +196,7 @@ client_find_subscription(struct client *client, const char *pattern,
 }
 
 static void
-on_net_close(struct server *s, void *c)
+on_net_close(struct server *s, void *c, struct listener *l)
 {
 	struct client *client = c;
 	client_free(client);
@@ -167,13 +205,13 @@ on_net_close(struct server *s, void *c)
 static void
 on_proto_error(struct proto *p, const char *msg)
 {
-	fprintf(stderr, "proto error: %s\n", msg);
+	log_msg(LOG_INFO, msg);
 }
 
 static void
 on_net_error(struct server *s, const char *msg)
 {
-	fprintf(stderr, "server error: %s\n", msg);
+	log_msg(LOG_WARNING, msg);
 }
 
 static int
@@ -362,13 +400,17 @@ on_app_input(struct proto *p, unsigned char msg,
 /* The listener has accepted a new fd.
  * Attach a new client context to it */
 static void *
-on_net_accept(struct server *s, int fd, void *l)
+on_net_accept(struct server *s, int fd, struct listener *l)
 {
-	// struct listener *listener = l;
 	struct client *client;
 
 	client = client_new(fd);
 	if (!client) { /* failed to allocate */
+		char namebuf[256];
+		const char *estr = strerror(errno);
+		log_msgf(LOG_WARNING, "[%s] client_new(): %s",
+			l ? l->peername(fd, namebuf, sizeof namebuf) : "?",
+			estr);
 		shutdown_read(fd);
 		return NULL;
 	}
@@ -378,13 +420,33 @@ on_net_accept(struct server *s, int fd, void *l)
 	return client;
 }
 
+/* basename not always available in libc */
+#define basename portable_basename
+static const char *
+basename(const char *name)
+{
+	const char *s = strrchr(name, '/');
+	return s ? s + 1 : name;
+}
+
+#ifndef SMALL
+/* A fake listener context for the stdin fd */
+static const char *
+stdin_peername(int fd, char *buf, size_t sz)
+{
+	return "stdin";
+}
+static struct listener stdin_listener = { "stdin", stdin_peername };
+#endif
+
 int
-main() {
-	/* set up a server and listening socket */
-	/* initialize a store */
+main(int argc, char *argv[])
+{
 	struct server_context server_context;
 	struct server *server;
 	int ret;
+	int error = 0;
+	int ch;
 
 	server_context.max_sockets = 64;
 	server_context.on_accept = on_net_accept;
@@ -394,13 +456,41 @@ main() {
 
 	server = server_new(&server_context);
 	if (!server) {
-		perror("server_new");
+		log_perror("server_new");
 		exit(1);
 	}
 
+	while ((ch = getopt(argc, argv, "sv")) != -1)
+		switch (ch) {
+		case 's':
+			options.syslog = 1;
+			break;
+		case 'v':
+			options.verbose++;
+			break;
+		case '?':
+			error = 2;
+			break;
+		}
+	if (error) {
+		if (error == 2) {
+			fprintf(stderr, "usage: %s [<uri>...]\n",
+				argv[0]);
+			fprintf(stderr, "uris:\n"
+					"\tunix[:<path>]\n"
+					"\ttcp[://localhost[:port]]\n"
+					"\tstdin\n");
+		}
+		server_free(server);
+		exit(error);
+	}
+
+	if (options.syslog)
+		openlog(basename(argv[0]), LOG_CONS | LOG_PERROR, LOG_DAEMON);
+
 #ifndef SMALL
-	if (server_add_fd(server, STDIN_FILENO, NULL) == -1) {
-		perror("server_add_fd");
+	if (server_add_fd(server, STDIN_FILENO, &stdin_listener) == -1) {
+		log_perror("[stdin] server_add_fd");
 		exit(1);
 	}
 #endif
@@ -409,7 +499,9 @@ main() {
 
 	while ((ret = server_poll(server, -1)) > 0)
 		if (ret == -1)
-			perror("poll");
+			log_perror("poll");
+	if (ret == 0 && options.verbose)
+		on_net_error(server, "no listeners!");
 
 	server_free(server);
 	store_free(the_store);

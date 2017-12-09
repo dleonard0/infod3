@@ -10,6 +10,11 @@
  */
 struct server;
 
+struct listener {
+	char name[64];
+	const char * (*peername)(int fd, char *buf, size_t sz);
+};
+
 struct server_context {
 	/* Limit to the number of open sockets. 0 means no limit. */
 	unsigned int max_sockets;
@@ -18,7 +23,7 @@ struct server_context {
 	 * The fd will not change for the life of the client.
 	 * Callback returns a new client context pointer.
 	 * If callback is NULL, a NULL client context will be used. */
-	void *(*on_accept)(struct server *s, int fd, void *listener);
+	void *(*on_accept)(struct server *s, int fd, struct listener *l);
 	/* Data ready callback (for clients).
 	 * This required callback is invoked when a client fd
 	 * becomes ready for read (poll's POLLIN event selector).
@@ -30,13 +35,13 @@ struct server_context {
 	 * Called after on_ready() or server_free() calls close(fd).
 	 * This callback matches on_accept() and can be used to
 	 * deallocate the client context pointer. */
-	void (*on_close)(struct server *s, void *client);
+	void (*on_close)(struct server *s, void *client, struct listener *l);
 	/* Listener close callback [optional]
 	 * This callback matches server_add_listener(), and can be
 	 * used to deallocate a listener context. All non-listeners
 	 * connections will have been closed at this point, and so
 	 * will the listener socket. */
-	void (*on_listener_close)(struct server *s, void *listener);
+	void (*on_listener_close)(struct server *s, struct listener *l);
 	/* Error callback callback [optional]
 	 * Called when on_ready() returns -1, or when other internal
 	 * allocations fail.
@@ -51,13 +56,13 @@ struct server *server_new(const struct server_context *c);
  * When it becomes ready for read, accept() will be called on fd and
  * the resulting new socket will be added to the server.
  * Returns -1 on error. (ENOMEM) */
-int server_add_listener(struct server *server, int fd, void *listener);
+int server_add_listener(struct server *server, int fd, struct listener *l);
 
 /* Adds an established connection to the server.
  * On success, the server will manage the fd's lifetime.
  * Returns -1 on error.
  */
-int server_add_fd(struct server *server, int fd, void *listener);
+int server_add_fd(struct server *server, int fd, struct listener *l);
 
 /* Dispatch all pending I/O just once, possibly blocking.
  * Call this multiple times in a loop.
