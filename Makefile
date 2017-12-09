@@ -5,6 +5,8 @@ TESTS += t-proto
 TESTS += t-server
 CFLAGS += -ggdb -O0 -Wall
 
+# The SMALL flag disables buffered protocols, leaving
+# only PROTO_MODE_FRAMED available.
 #CPPFLAGS += -DSMALL
 
 default: check infod
