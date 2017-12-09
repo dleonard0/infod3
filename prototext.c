@@ -9,6 +9,8 @@
 
 #ifndef SMALL
 
+#define PSEUDO_HELP 0xfe
+
 /* -- text decode -- */
 
 /* Command (and message) table */
@@ -29,8 +31,59 @@ static struct {
 	{ "INFO", MSG_INFO, "t|0t" },
 	{ "PONG", MSG_PONG, "|t" },
 	{ "ERROR", MSG_ERROR, "t" },
+	{ "HELP", PSEUDO_HELP, "" },
 	{}
 };
+
+static const char help_text[] =
+	"Commands:\r\n"
+	" hello <int> [<clientid>]   - negotiate protocol\r\n"
+	" sub <pattern>              - subscribe to pattern\r\n"
+	" unsub <pattern>            - remove previous subscription\r\n"
+	" get <key>                  - request stored INFO\r\n"
+	" put <key> [<value>]        - update store\r\n"
+	" begin                      - begin command group\r\n"
+	" commit                     - execute command group\r\n"
+	" ping [<string>]            - request a PONG reply\r\n"
+	" help                       - this help text\r\n"
+	"\r\n"
+	"Reply messages:\r\n"
+	" version <int> [<serverid>] - server's selected protocol\r\n"
+	" info <key> [<value>]       - store content; no <value> deleted\r\n"
+	" pong [<string>]            - reply to PING\r\n"
+	" error <text>               - error message\r\n"
+	"\r\n"
+	"Quoting:\r\n"
+	" All server-generated strings are enclosed in quotes \"...\".\r\n"
+	" Quoted strings never contain an unescaped LF CR \" \\ or NUL.\r\n"
+	" Escapes are always octal, eg \\134 for \\ and \\042 for \".\r\n"
+	" If your string does not start with \" then it's assumed literal\r\n"
+	" and continues until next SPC, or EOL when last arg.\r\n"
+	"\r\n"
+	"Patterns:\r\n"
+	" x       Any char except ( | ) * \\ matches itself\r\n"
+	" *x      Matches shortest substring up to and including an x\r\n"
+	" *       Wildcard at end of pattern matches rest of string\r\n"
+	" (a|b|c) Matches first branch a b or c then resumes at )\r\n"
+	" \\x      Matches char x which may be a metachar.\r\n"
+	"End of help.\r\n"
+	;
+
+static int
+text_input(struct proto *p, unsigned char msg,
+	const char *data, unsigned int datalen)
+{
+	if (msg == PSEUDO_HELP) {
+		if (p->on_sendv) {
+			struct iovec iov;
+			iov.iov_base = (char *)help_text;
+			iov.iov_len = sizeof help_text - 1;
+			return p->on_sendv(p, &iov, 1);
+		}
+		return 1;
+	}
+	return p->on_input(p, msg, data, datalen);
+}
 
 /* Decode one byte from the text protocol.
  * Returns -1 on unrecoverable errors.
@@ -107,7 +160,7 @@ again:
 				/* pass up full input command */
 				if (rxbuf_zeropad(&p->rx) == -1)
 					return -1;
-				ret = p->on_input(p, p->rx.buf[0] & 0xff,
+				ret = text_input(p, p->rx.buf[0] & 0xff,
 					&p->rx.buf[1], p->rx.len - 1);
 				if (ret <= 0)
 					return ret;
