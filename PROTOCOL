@@ -230,8 +230,12 @@ Text form of messages
 			"	\042
 			\	\134
 
-	The server will accept all quoted \ooo sequences, but will
-	only ever generate the four octal sequences \012 \015 \042 \134.
+	The server must accept all quoted \ooo sequences.
+	The server must always generate these five octal sequences
+	instead of their unescaped byte form:
+
+		\000 \012 \015 \042 \134
+
 	The server must not accept non-octal escapes. That is, a
 	backslash in a quoted string must be followed by three octal
 	digits.

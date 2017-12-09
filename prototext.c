@@ -334,7 +334,8 @@ output_text_string(struct proto *p, const char *str, unsigned int len)
 	while (len--) {
 		char ch = *str++;
 		if (ch == '\n' || ch == '\r' ||
-		    ch == '"' || ch == '\\')
+		    ch == '"' || ch == '\\' ||
+		    ch == '\0')
 		{
 			char esc[4] = { '\\',
 					'0' | ((ch >> 6) & 7),

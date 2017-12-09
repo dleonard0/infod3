@@ -594,6 +594,8 @@ test_text_proto()
 	assert_mock_on_input(p, CMD_HELLO, "\3w oo");
 	assert_proto_recv(p, "hello 3 \"w oo\"\n");
 	assert_mock_on_input(p, CMD_HELLO, "\3w oo");
+	assert_proto_recv(p, "hello 3 \"w\000oo\"\n");
+	assert_mock_on_input(p, CMD_HELLO, "\3w\0oo");
 
 	/* Exercise receiving blank lines [from net] */
 	assert_proto_recv(p, "\n");
@@ -701,6 +703,10 @@ test_text_proto()
 	assert_mock_on_sendv(p, "INFO \"key\"\r\n");
 	assert(proto_output(p, MSG_INFO, "%*s", 10, "key\0val\nue") != -1);
 	assert_mock_on_sendv(p, "INFO \"key\" \"val\\012ue\"\r\n");
+	assert(proto_output(p, MSG_INFO, "%*s", 10, "key\0val\0ue") != -1);
+	assert_mock_on_sendv(p, "INFO \"key\" \"val\\000ue\"\r\n");
+	assert(proto_output(p, MSG_INFO, "%*s", 10, "key\0val\2ue") != -1);
+	assert_mock_on_sendv(p, "INFO \"key\" \"val\2ue\"\r\n");
 	assert(proto_output(p, MSG_INFO, "%s%c%*s", "key",0,6,"val\nue")!=-1);
 	assert_mock_on_sendv(p, "INFO \"key\" \"val\\012ue\"\r\n");
 	assert(proto_output(p, MSG_PONG, "") != -1);
