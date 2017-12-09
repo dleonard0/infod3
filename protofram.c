@@ -21,9 +21,11 @@ output_binary_error(struct proto *p, int err, const char *fmt, ...)
 }
 
 /* Convert the format string into an iov list.
- * The format string is quite restricted, so it is heavily tested.
- * Some iovs may point to static memory that will be overwritten next time.
- * Returns number if iov, or -1 on error. */
+ * The format string only supports %c %s and %*s, and spaces are ignored.
+ * Approximately one iov per format is used.
+ * The work buffer is used to collect %c output, and returned iovs
+ * may point into it.
+ * Returns number of iov created, or -1 on error. */
 int
 to_binary_iov(struct proto *p, struct iovec *iov, int maxiov,
 	char *work, size_t worksz,
@@ -90,8 +92,8 @@ recv_framed(struct proto *p, const char *net, unsigned int netlen)
 int
 output_framed(struct proto *p, unsigned char msg, const char *fmt, va_list ap)
 {
-	struct iovec iov[10];
-	char work[16];
+	struct iovec iov[8];
+	char work[8];
 	int niov = to_binary_iov(p, &iov[1], ARRAY_SIZE(iov) - 1,
 		work, sizeof work, fmt, ap);
 	if (niov < 0)
