@@ -362,6 +362,7 @@ mock_on_error_clear()
 	mock_on_error.msg[0] = '\0';
 }
 
+__attribute__((unused))
 static void
 assert_mock_on_error_called(int line, const char *call, struct proto *p)
 {
@@ -406,6 +407,7 @@ static char Mega[MEGA_SIZE];
 #define assert_proto_recv(p, s) \
 	assert(proto_recv(p, s, sizeof s - 1) > 0)
 
+#ifndef SMALL
 static void
 test_binary_proto()
 {
@@ -545,9 +547,11 @@ test_binary_proto()
 
 	proto_free(p);
 }
+#endif /* !SMALL */
 
 /* -- text protocol tests -- */
 
+#ifndef SMALL
 static void
 test_text_proto()
 {
@@ -743,6 +747,7 @@ test_text_proto()
 
 	proto_free(p);
 }
+#endif /* !SMALL */
 
 static void
 test_framed_proto()
@@ -829,8 +834,10 @@ main()
 	proto_free(p);
 		assert_mock_udata_free(udata1);
 
+#ifndef SMALL
 	test_binary_proto();
 	test_text_proto();
+#endif
 	test_framed_proto();
 
 	dprintf("%s:%d: %s\n", __FILE__, __LINE__, PASSED);

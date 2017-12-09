@@ -130,6 +130,10 @@ int proto_output(struct proto *p, unsigned char msg, const char *fmt, ...);
 int proto_outputv(struct proto *p, unsigned char msg, const char *fmt,
 	va_list ap);
 
+/* Sends a MSG_ERROR to the peer, fmt is human text */
+__attribute__((format(printf, 2, 3)))
+int proto_output_error(struct proto *p, const char *fmt, ...);
+
 struct iovec;
 
 /* Sets the upcall for delivering a PDU to the network.

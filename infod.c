@@ -398,10 +398,12 @@ main() {
 		exit(1);
 	}
 
+#ifndef SMALL
 	if (server_add_fd(server, STDIN_FILENO, NULL) == -1) {
 		perror("server_add_fd");
 		exit(1);
 	}
+#endif
 
 	the_store = store_new();
 
