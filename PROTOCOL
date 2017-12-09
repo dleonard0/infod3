@@ -3,9 +3,11 @@ infod3 protocol
 
 	The infod3 protocol is a client-server protocol. The server
 	maintains a key/value store, and connected client may
-	subscribe to changes by key pattern.
+	add, update and delete entries. Clients can also subscribe to
+	changes in the store by key pattern, and receive immediate
+	updates. Coherent updates are supported through transactions.
 
-	A client can send the following messages to the server:
+	A client can send the following commands to the server:
 
 		HELLO <v><text>
 		SUB <pattern>
@@ -24,32 +26,48 @@ infod3 protocol
 		ERROR <text>
 
 	The client closes the connection at its pleasure.
+	Most server messages are sent in response to a client command.
+	Error messages can be sent by the server at any time, and
+	the client should retry on network failure.
 
-	The limit on the combined size of a key and value is 64kB,
-	including a NUL byte separator between the two.
-	The limit on the size of all message arguments is also 64kB.
+	The size of any key/value entry is limited to 65535 bytes,
+	including the NUL byte separator between the key and value.
+	The keys cannot contain NUL.
+
+	There are three wire encodings of the protocols defined:
+		- text stream
+		- binary stream (tag-length-value layout)
+		- framed binary (same as binary but without length)
 
 Client Commands
 
 	HELLO <v><text>
 
-	    The client indicates the protocol version it wishes to talk
-	    and optionally identifies itself to the server. This
-	    document describes version 0. This should be the first
-	    message if sent. A client need not wait for the VERSION response
+	    The client indicates the protocol version it wishes to talk.
+	    The server will respond with a VERSION message indicating
+	    its capability.
+	    This document describes version 0 of the protocol.
+	    The HELLO also optionally identifies the client to the
+	    server in the text portion. A server may log this as an
+	    indication of the client software's state.
+	    If sent at all, HELLO should be the first message sent.
+	    A client need not wait for the VERSION response
 	    before sending subsquent commands compatible with version 0.
 
 	SUB <pattern>
 	UNSUB <pattern>
 
-	    The client's channel has associated a set of active
+	    Manages subscriptions in the current client's channel.
+	    Every client connection is associated with a set of active
 	    subscriptions. The patterns are documented in match.h
 	    but are similar to glob(7).
 
 	    When a new subscription is received, the server will
-	    immediately send UPDATED messages for every matching key.
-	    Until an matching UNSUB, the server will asynchronously
-	    send INFO messages as the key's value changes.
+	    immediately send INFO messages for every existing matching
+	    key. From then until an matching UNSUB, the server will
+	    asynchronously send INFO messages for matching key's value
+	    changes.
+	    A server may place a limit on the number of subscriptions.
 
 	GET <key>
 
@@ -140,7 +158,7 @@ Binary form of messages
 	If a server sends an ERROR message in binary mode, it must
 	immediately close the connection.
 
-	The maxium size of a binary message is 65538 bytes.
+	The maxium size of a binary message is 65538 bytes (64kB + 2).
 
 	A binary client need not send a HELLO message if it
 	is going to use version 0 messages.
@@ -163,9 +181,9 @@ Text form of messages
 	Blank lines are ignored.
 
 	A server must switch to binary mode if it receives
-	a binary HELLO message commencing with 0x00.
+	an initial binary HELLO message commencing with 0x00.
 
-	The server will always respond in uppercase
+	The server will always send uppercase
 	and emit minimal space characters <sp>. It will
 	always terminate lines with <cr><lf>. It will
 	never send blank lines consisting of just <cr><lf>.
@@ -198,20 +216,27 @@ Text form of messages
 	<ident>, <pattern>, <key>, <value> and <text> strings are encoded in
 	the following quoting system:
 
-		- If the string has no length, it is encoded as ""
+		- If the string has no length, it must be encoded as ""
 		- If the string contains only UTF-8 characters, excluding
-			<sp> <cr> <lf> "
-		  then it is encoded directly without quoting.
-		- Otherwise it is encoded enclosed in " with the
-		  following bytes escaped as the sequence \<oct><oct><oct>
+			<sp> <cr> <lf>
+		  and does not begin with ", then it may be encoded
+		  directly without quoting and without any special meaning
+		  for " or \.
+		- Otherwise the string must be enclosed in " with the
+		  following bytes octal escaped as \ooo:
 
 			<lf>	\012
 			<cr>	\015
 			"	\042
 			\	\134
 
-	The server will interpret all quoted \ooo sequences, but will
-	only generate the four octal sequences listed above.
+	The server will accept all quoted \ooo sequences, but will
+	only ever generate the four octal sequences \012 \015 \042 \134.
+	The server must not accept non-octal escapes. That is, a
+	backslash in a quoted string must be followed by three octal
+	digits.
+
+	The server will always quote the strings it sends.
 
 	If the server sends an ERROR message in response to a malformed
 	command, it should not close the connection.

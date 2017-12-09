@@ -605,7 +605,7 @@ test_text_proto()
 	 * (This relies on the proto receiving one text message
 	 * earlier, otherwise it would be in binary mode) */
 	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
-	assert_mock_on_sendv(p, "HELLO 0 hello\r\n");
+	assert_mock_on_sendv(p, "HELLO 0 \"hello\"\r\n");
 
 	/* Exercise recv other messages [from net] */
 	assert_proto_recv(p, "sub *\n");
@@ -663,25 +663,25 @@ test_text_proto()
 
 	/* Exercise sensing messages to the net */
 	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
-	assert_mock_on_sendv(p, "HELLO 0 hello\r\n");
+	assert_mock_on_sendv(p, "HELLO 0 \"hello\"\r\n");
 	assert(proto_output(p, CMD_HELLO, "%c", 0) != -1);
 	assert_mock_on_sendv(p, "HELLO 0\r\n");
 	assert(proto_output(p, CMD_SUB, "%s", "*") != -1);
-	assert_mock_on_sendv(p, "SUB *\r\n");
+	assert_mock_on_sendv(p, "SUB \"*\"\r\n");
 	assert(proto_output(p, CMD_UNSUB, "%s", "*") != -1);
-	assert_mock_on_sendv(p, "UNSUB *\r\n");
+	assert_mock_on_sendv(p, "UNSUB \"*\"\r\n");
 	assert(proto_output(p, CMD_GET, "%s", "key") != -1);
-	assert_mock_on_sendv(p, "GET key\r\n");
+	assert_mock_on_sendv(p, "GET \"key\"\r\n");
 
 	/* exercising CMD_PUT in its various ways [to net] */
 	assert(proto_output(p, CMD_PUT, "%s", "key") != -1);
-	assert_mock_on_sendv(p, "PUT key\r\n");
+	assert_mock_on_sendv(p, "PUT \"key\"\r\n");
 	assert(proto_output(p, CMD_PUT, "%s%c%s", "key", 0, "val") != -1);
-	assert_mock_on_sendv(p, "PUT key val\r\n");
+	assert_mock_on_sendv(p, "PUT \"key\" \"val\"\r\n");
 	assert(proto_output(p, CMD_PUT, "%*s%c%s", 3, "key", 0, "val") !=-1);
-	assert_mock_on_sendv(p, "PUT key val\r\n");
+	assert_mock_on_sendv(p, "PUT \"key\" \"val\"\r\n");
 	assert(proto_output(p, CMD_PUT, "%*s", 7, "key\0val") != -1);
-	assert_mock_on_sendv(p, "PUT key val\r\n");
+	assert_mock_on_sendv(p, "PUT \"key\" \"val\"\r\n");
 	assert(proto_output(p, CMD_BEGIN, "") != -1);
 	assert_mock_on_sendv(p, "BEGIN\r\n");
 	assert(proto_output(p, CMD_COMMIT, "") != -1);
@@ -689,34 +689,39 @@ test_text_proto()
 	assert(proto_output(p, CMD_PING, "") != -1);
 	assert_mock_on_sendv(p, "PING\r\n");
 	assert(proto_output(p, CMD_PING, "%s", "abcd") != -1);
-	assert_mock_on_sendv(p, "PING abcd\r\n");
+	assert_mock_on_sendv(p, "PING \"abcd\"\r\n");
 
 	assert(proto_output(p, MSG_VERSION, "%c", 9) != -1);
 	assert_mock_on_sendv(p, "VERSION 9\r\n");
 	assert(proto_output(p, MSG_VERSION, "%c %s", 9, "") != -1);
 	assert_mock_on_sendv(p, "VERSION 9 \"\"\r\n");
 	assert(proto_output(p, MSG_VERSION, "%c %s", 9, "wxyz") != -1);
-	assert_mock_on_sendv(p, "VERSION 9 wxyz\r\n");
+	assert_mock_on_sendv(p, "VERSION 9 \"wxyz\"\r\n");
 	assert(proto_output(p, MSG_INFO, "%s", "key") != -1);
-	assert_mock_on_sendv(p, "INFO key\r\n");
+	assert_mock_on_sendv(p, "INFO \"key\"\r\n");
 	assert(proto_output(p, MSG_INFO, "%*s", 10, "key\0val\nue") != -1);
-	assert_mock_on_sendv(p, "INFO key \"val\\012ue\"\r\n");
+	assert_mock_on_sendv(p, "INFO \"key\" \"val\\012ue\"\r\n");
 	assert(proto_output(p, MSG_INFO, "%s%c%*s", "key",0,6,"val\nue")!=-1);
-	assert_mock_on_sendv(p, "INFO key \"val\\012ue\"\r\n");
+	assert_mock_on_sendv(p, "INFO \"key\" \"val\\012ue\"\r\n");
 	assert(proto_output(p, MSG_PONG, "") != -1);
 	assert_mock_on_sendv(p, "PONG\r\n");
 	assert(proto_output(p, MSG_PONG, "%s", "abcd") != -1);
-	assert_mock_on_sendv(p, "PONG abcd\r\n");
+	assert_mock_on_sendv(p, "PONG \"abcd\"\r\n");
 	assert(proto_output(p, MSG_ERROR, "%s", "abcd") != -1);
-	assert_mock_on_sendv(p, "ERROR abcd\r\n");
+	assert_mock_on_sendv(p, "ERROR \"abcd\"\r\n");
 
 	/* Test sending the largest string possible */
 	assert(sizeof Mega >= 0xffff);
 	assert(proto_output(p, MSG_ERROR, "%*s", 0xffff, Mega) != -1);
 	assert(mock_on_sendv.counter > 0);
 	assert(mock_on_sendv.datalen ==
-		strlen("ERROR ") + 0xffff + strlen("\r\n"));
-	assert(memcmp(mock_on_sendv.data + strlen("ERROR "), Mega, 0xffff) == 0);
+		strlen("ERROR \"") + 0xffff + strlen("\"\r\n"));
+	assert(memcmp(mock_on_sendv.data,
+		"ERROR \"", strlen("ERROR \"")) == 0);
+	assert(memcmp(mock_on_sendv.data + strlen("ERROR \""),
+		Mega, 0xffff) == 0);
+	assert(memcmp(mock_on_sendv.data + strlen("ERROR \"") + 0xffff,
+		"\"\r\n", strlen("\"\r\n")) == 0);
 	mock_on_sendv_clear();
 
 	/* Exercise some malformed formats [to net] */

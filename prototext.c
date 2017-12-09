@@ -322,41 +322,32 @@ output_text_error(struct proto *p, int err, const char *fmt, ...)
 	return -1;
 }
 
-/* Sends a string argument; quoting if needed */
+/* Sends a quoted string argument */
 static int
 output_text_string(struct proto *p, const char *str, unsigned int len)
 {
 	if (len > 0xffff)
 		return output_text_error(p, EINVAL,
 			"string too big, len %u > %u", len, 0xffff);
-	if (len == 0 ||
-	    str[0] == '"' ||
-	    memchr(str, ' ', len) ||
-	    memchr(str, '\r', len) ||
-	    memchr(str, '\n', len))
-	{
-		if (outbuf_putc(p, '"') == -1)
-			return -1;
-		while (len--) {
-			char ch = *str++;
-			if (ch == '\n' || ch == '\r' ||
-			    ch == '"' || ch == '\\')
-			{
-				char esc[4] = { '\\',
-						'0' | ((ch >> 6) & 7),
-						'0' | ((ch >> 3) & 7),
-						'0' | ((ch >> 0) & 7) };
-				if (proto_outbuf(p, esc, sizeof esc) == -1)
-					return -1;
-			} else {
-				if (outbuf_putc(p, ch) == -1)
-					return -1;
-			}
+	if (outbuf_putc(p, '"') == -1)
+		return -1;
+	while (len--) {
+		char ch = *str++;
+		if (ch == '\n' || ch == '\r' ||
+		    ch == '"' || ch == '\\')
+		{
+			char esc[4] = { '\\',
+					'0' | ((ch >> 6) & 7),
+					'0' | ((ch >> 3) & 7),
+					'0' | ((ch >> 0) & 7) };
+			if (proto_outbuf(p, esc, sizeof esc) == -1)
+				return -1;
+		} else {
+			if (outbuf_putc(p, ch) == -1)
+				return -1;
 		}
-		return outbuf_putc(p, '"');
 	}
-
-	return proto_outbuf(p, str, len);
+	return outbuf_putc(p, '"');
 }
 
 int
