@@ -158,7 +158,8 @@ proto_recv(struct proto *p, const void *netv, unsigned int netlen)
 	}
 
 	if (net[netlen])
-		return recv_error(p, EINVAL, "terminal NUL missing");
+		return recv_error(p, EINVAL,
+			"internal error: missing NUL pad");
 
 #ifndef SMALL
 	/* Autodetect text/binary mode based on first byte */

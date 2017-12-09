@@ -148,7 +148,7 @@ void proto_set_on_sendv(struct proto *p,
     int (*on_sendv)(struct proto *p, const struct iovec *iovs, int niovs));
 
 /* Sets an upcall handler to receive error messages generated
- * within the protocl.
+ * within the protocol.
  * If NULL or unset, messages will be sent to stderr. */
 void proto_set_on_error(struct proto *p,
     void (*on_error)(struct proto *p, const char *msg));
