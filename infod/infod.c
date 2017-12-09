@@ -15,7 +15,7 @@
 #include <sys/uio.h>
 
 #include "server.h"
-#include "proto.h"
+#include "../lib/proto.h"
 #include "store.h"
 #include "match.h"
 #include "list.h"

@@ -1,7 +1,11 @@
 *.o
+*.po
+*.a
+*.so
 t-match
 t-store
 t-proto
 t-server
+infod/infod
+info/info
 .*.swp
-infod
