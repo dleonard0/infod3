@@ -124,6 +124,44 @@ Server messages
 	    The server may close the connection immediately after
 	    sending this message.
 
+Patterns
+
+	Subscription patterns are matched against existing and future keys.
+	A pattern is a UTF-8 string with some characters (metachars)
+	having special meaning:
+
+		( | ) * \
+
+	The pattern is matched from left-to-right against each candidate key,
+	succeding when the pattern matches the entire key. The pattern fails
+	immediately when an element of the pattern fails to match.
+
+	The elements of a pattern are:
+
+		c	Any regular character (non-metachar) matches itself.
+
+		*c	The * matches the shortest substring (including
+			empty string) up to and then including the next
+			regular character c.
+
+		*	A * at the end of a pattern or followed by | or )
+			greedily matches the rest of the key string.
+			Patterns containing ** or *( are invalid.
+
+		(x|y|...)
+			A group matches the first matching branch of x y etc.
+			Once a branch is matched, subsequent branches are
+			ignored and matching continues after the closing ).
+			Parenthesised groups can be nested up to four deep.
+
+		\c	Matches exactly the character c which may be
+			a metachar. (Note that quoted backslashes may
+			appear as \134 in the text protocol.)
+
+	The greedy nature of * means that the pattern "iface.*.mtu" will
+	find key "iface.eth0.mtu" but miss "iface.bridge0.port1.mtu".
+	However, pattern "iface.*" will get both.
+
 Binary form of messages
 
 	Binary messages are of the form
