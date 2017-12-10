@@ -277,12 +277,10 @@ buffer_command(struct client *client, unsigned char msg,
 		return 1;
 	}
 	if (client->nbufcmds >= MAX_BUFCMDS)
-		return proto_output(p, MSG_ERROR, "%s",
-			"commit buffer overflow");
+		return proto_output_error(p, "commit buffer overflow");
 	bcmd = bufcmd_new(msg, data, datalen);
 	if (!bcmd)
-		return proto_output(p, MSG_ERROR, "%s%s",
-			"begin: ", strerror(errno));
+		return proto_output_error(p, "begin: %s", strerror(errno));
 	APPEND(bcmd, client->bufcmd_tail);
 	return 1;
 }
@@ -309,21 +307,20 @@ on_app_input(struct proto *p, unsigned char msg,
 		return proto_output(p, MSG_VERSION, "%c%s", 0, "infod3");
 	case CMD_SUB:
 		if (client->nsubs > MAX_SUBS)
-			return proto_output(p, MSG_ERROR, "%s",
+			return proto_output_error(p,
 				"sub: too many subscriptions");
 		if (contains_nul(data, datalen) || !match_isvalid(data))
-			return proto_output(p, MSG_ERROR, "%s",
-				"sub: invalid pattern");
+			return proto_output_error(p, "sub: invalid pattern");
 		sub = subscription_new(data, datalen);
 		if (!sub)
-			return proto_output(p, MSG_ERROR, "%s%s",
-				"sub: ", strerror(errno));
+			return proto_output_error(p, "sub: %s",
+				strerror(errno));
 		INSERT(sub, client->subs);
 		client->nsubs++;
 		index = index_open(the_store);
 		if (!index)
-			return proto_output(p, MSG_ERROR, "%s%s",
-				"sub: ", strerror(errno));
+			return proto_output_error(p, "sub: %s",
+				strerror(errno));
 		while ((info = index_next(index)))
 			if (match(data, info->keyvalue))
 				if (proto_output(p, MSG_INFO, "%*s",
@@ -341,8 +338,7 @@ on_app_input(struct proto *p, unsigned char msg,
 		return 1;
 	case CMD_READ:
 		if (contains_nul(data, datalen))
-			return proto_output(p, MSG_ERROR, "%s",
-				"get: invalid key");
+			return proto_output_error(p, "get: invalid key");
 		info = store_get(the_store, data);
 		if (!info)
 			return proto_output(p, MSG_INFO, "%s%c", data, 0);
@@ -368,12 +364,12 @@ on_app_input(struct proto *p, unsigned char msg,
 				return 1; /* no change */
 			info = info_new(datalen);
 			if (!info)
-				return proto_output(p, MSG_ERROR, "%s%s",
-					"put: ", strerror(errno));
+				return proto_output_error(p, "put: %s",
+					strerror(errno));
 			memcpy(info->keyvalue, data, datalen);
 			if (store_put(the_store, info) == -1)
-				return proto_output(p, MSG_ERROR, "%s%s",
-					"put: ", strerror(errno));
+				return proto_output_error(p, "put: %s",
+					strerror(errno));
 		}
 		/* notify all subscribers */
 		for (c = all_clients; c; c = NEXT(c))
@@ -390,9 +386,9 @@ on_app_input(struct proto *p, unsigned char msg,
 		client->begins = 1;
 		return 1;
 	case CMD_COMMIT:
-		return proto_output(p, MSG_ERROR, "%s", "commit: no begin");
+		return proto_output_error(p, "commit: no begin");
 	default:
-		return proto_output(p, MSG_ERROR, "%s", "bad message");
+		return proto_output_error(p, "unexpected message %02x", msg);
 	}
 }
 

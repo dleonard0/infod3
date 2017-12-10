@@ -117,17 +117,24 @@ proto_get_mode(struct proto *p)
 /*
  * Sends a MSG_ERROR to the peer.
  * This is automatically called from the proto_recv() path on protocol errors.
- * Returns -1.
+ * Returns -1, except in PROTO_MODE_TEXT when it returns 1.
  */
 int
 proto_output_error(struct proto *p, const char *fmt, ...)
 {
 	va_list ap;
 	char buf[16384];
+
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof buf, fmt, ap);
 	va_end(ap);
-	proto_output(p, MSG_ERROR, "%s", buf);
+	if (proto_output(p, MSG_ERROR, "%s", buf) < 0)
+		return -1;
+#ifndef SMALL
+	/* When in text mode, keep the channel open */
+	if (p->mode == PROTO_MODE_TEXT)
+		return 1;
+#endif
 	return -1;
 }
 
