@@ -588,7 +588,8 @@ main(int argc, char *argv[])
 #else /* SMALL */
 						"[-siv] [-p port]"
 #endif /* SMALL */
-				, argv[0]);
+				"\n",
+				argv[0]);
 		}
 		exit(error);
 	}
