@@ -130,7 +130,7 @@ Patterns
 	A pattern is a UTF-8 string with some characters (metachars)
 	having special meaning:
 
-		( | ) * \
+		( | ) * ? \
 
 	The pattern is matched from left-to-right against each candidate key,
 	succeding when the pattern matches the entire key. The pattern fails
@@ -144,9 +144,12 @@ Patterns
 			empty string) up to and then including the next
 			regular character c.
 
+		?	A ? matches any single character.
+
 		*	A * at the end of a pattern or followed by | or )
 			greedily matches the rest of the key string.
 			Patterns containing ** or *( are invalid.
+			The pattern *? is equivalent to ?.
 
 		(x|y|...)
 			A group matches the first matching branch of x y etc.

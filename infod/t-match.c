@@ -24,7 +24,7 @@ main()
 	PASS("\\x", "x");
 	PASS("\\(", "(");
 
-	/* Simple wildcard */
+	/* Simple wildcard (*) */
 	PASS("*", "");
 	PASS("*", "foo");
 	PASS("*.", "foo.");
@@ -37,6 +37,24 @@ main()
 	PASS("*a*", "aa");
 	FAIL("*a*", "b");
 	FAIL("*a*", "");
+
+	/* Simple anychar (?) */
+	FAIL("?", "");
+	PASS("?", "x");
+	FAIL("?", "xx");
+	PASS("a?c", "abc");
+	FAIL("a?c", "ac");
+	PASS("ab?", "abc");
+	FAIL("ab?", "ab");
+
+	/* '*?' is the same as '?' */
+	FAIL("*?", "");
+	PASS("*?", "x");
+	FAIL("*?", "xx");
+	PASS("a*?c", "abc");
+	FAIL("a*?c", "ac");
+	PASS("ab*?", "abc");
+	FAIL("ab*?", "ab");
 
 	/* Parentheses match */
 	PASS("()", "");		FAIL("()", "x");

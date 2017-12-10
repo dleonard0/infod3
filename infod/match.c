@@ -32,6 +32,8 @@ do_match(const char *pattern, const char *string)
 				/* greedy to end of string */
 				if (string != CHECK)
 					string = "";
+			} else if (n == '?') {
+				/* pattern *? is equivalent to ? */
 			} else {
 				if (n == '\\') {	/* '*\n' */
 					if (!(n = pattern[1]))
@@ -82,14 +84,16 @@ do_match(const char *pattern, const char *string)
 				paren--;
 			}
 		} else {
+			int any = 0;
 			if (p == '\\') {
 				p = *pattern++;
 				if (!p)
 					return -1; /* \ at end of pattern */
-			}
+			} else if (p == '?')
+				any = 1;
 			if (string == CHECK)
 				; /* only doing validity check */
-			else if (*string == p)
+			else if (any ? *string : *string == p)
 				string++;
 			else if (paren)
 				paren->failed = 1;
