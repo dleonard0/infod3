@@ -1,7 +1,7 @@
 
 # infod3 - An introduction
 
-infod3 is a small-footprint key-value store with subscribe-notify service
+infod3 is a small-footprint key-value store with a subscribe-notify service
 for unix systems.
 
 Start your server.
@@ -10,12 +10,12 @@ Start your server.
 
 ## Storing and retrieving a value
 
+Let's store the value *Tim* under the key *name*
+using the `info` tool.
+
     $ info -w name=Tim
     $ info -r name
     Tim
-
-We just stored the value *Tim* with the key *name*
-using the CLI tool, `info`.
 
 If you thought that was cool, hold onto your pants.
 We're going to do it again using a TCP interface:
@@ -27,24 +27,25 @@ We're going to do it again using a TCP interface:
     ^C
 
 We typed `r` and `w` commands and the server responded with `INFO`.
-Case in this channel doesn't matter actually.
-The `r` and `w` were also aliases for `read` and `write`.
-And the server accepted our unquoted strings, because they were simple.
-This makes command-line experimentation with the protocol easy.
-You can type `help` in that channel too.
+The `r` and `w` were aliases for `READ` and `WRITE`.
+The server accepted our unquoted string args, because
+it's friendly and the strings were simple.
+This makes experimentation with the protocol easy,
+and, when you need it, robust quoting is available.
+You can also type `help` in this channel for syntax help.
 
-The binary interface is much more efficient.
-It's what the CLI tools and library use.
+The binary AF\_UNIX interface is much more efficient.
+It's what the CLI tools and C library use.
 See [PROTOCOL](PROTOCOL) for details.
-There's a C library for clients of course.
 
     $ info -r name
     Fred
 
 ## Subscribe-notify
 
-We have two terminal sessions.
-I've inserted blank lines to make the order of responses clear.
+Now we have two terminal sessions, side-by-side.
+I've staggered them to make the order of responses clear.
+Let's subscribe on the left, and make changes on the right:
 
     $ nc localhost 26931
     sub foo
@@ -62,56 +63,43 @@ I've inserted blank lines to make the order of responses clear.
     foo fighters
     ^C
 
-The 'sub' command *subscribes* to a key pattern `foo`.
-That pattern matches exactly one key, foo.
-I could have subscribed to pattern `*` to see every key,
-or `f*` to see every key starting with 'f'.
-The pattern language is glob-like but simpler (see docs).
+The `sub` command subscribed to the key pattern, `foo`,
+which matches exactly one key.
+We could have subscribed to pattern `*` to see every key,
+or to `f*` to see every key starting with 'f'.
+You get the idea. It's glob-like.
 
-On the right-hand side I started changing the value of key foo,
-and you can see that the left-hand session was immediately notified of
-those changes.
-The bottom half of the example shows the same thing but using
-the 'info' tool.
-
-Subscriptions only exist in the client channel.
+Subscriptions only exist in their client channel.
 They are lost when the connection is closed.
 
 ## Transactions
 
+Other clients may change keys at any time.
+We want *coherent* keys:
+
     $ nc localhost 26931
     begin
-    read name
-    read foo
-    read quz
+    read dog.name
+    read dog.length
+    read dog.toy
     ping
     commit
-    INFO "name" "Fred"
-    INFO "foo" "fighters"
-    INFO "quz"
+    INFO "dog.name" "Fred"
+    INFO "dog.length" "0.7 m"
+    INFO "dog.toy"
     PONG
     ^C
 
 The server recorded commands after 'begin' until 'commit'. Then,
-all the recorded commands are run at once, atomically.
-This is for when you want a *coherent* view of multiple
-values, without having to worry that values changed between your
-'read' commands.
-
-The CLI tools uses transactions.
+all the recorded commands are run together, *atomically*.
+The CLI tools use transactions.
 
 ## That's it!
 
-You've now seen the entire feature set of infod3:
+You've now seen what infod3 can do:
 
- - key-value store
+ - store key-values
  - subscribe-notify
  - transactions
- - text and binary equivalent protocols
+ - text and binary protocols
 
-## Using the C library
-
-```c
-tbd
-
-```
