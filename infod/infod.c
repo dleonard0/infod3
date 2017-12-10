@@ -24,7 +24,14 @@
 #define MAX_BUFCMDS	32
 
 static struct options {
+#ifndef SMALL
 	unsigned char verbose;
+# define VERBOSE options.verbose
+	unsigned char stdin;
+	const char *port;
+#else /* VERBOSE is a constant so that branches can be optimized away */
+# define VERBOSE 0
+#endif
 	unsigned char syslog;
 } options;
 
@@ -80,7 +87,7 @@ log_msgf(int level, const char *fmt, ...)
 		vsyslog(level, fmt, ap2);
 		va_end(ap2);
 	}
-	fprintf(stderr, fmt, ap);
+	vfprintf(stderr, fmt, ap);
 	fputc('\n', stderr);
 	va_end(ap);
 }
@@ -451,6 +458,57 @@ main(int argc, char *argv[])
 	int ret;
 	int error = 0;
 	int ch;
+	static const char *option_flags =
+		"s"
+#ifndef SMALL
+		"p:"
+		"i"
+		"v"
+#endif /* !SMALL */
+		;
+
+	while ((ch = getopt(argc, argv, option_flags)) != -1)
+		switch (ch) {
+		case 's':
+			options.syslog = 1;
+			break;
+#ifndef SMALL
+		case 'p':
+			options.port = optarg;
+			break;
+		case 'i':
+			options.stdin = 1;
+			break;
+		case 'v':
+			VERBOSE++;
+			break;
+#endif /* !SMALL */
+		case '?':
+			error = 2;
+			break;
+		}
+	if (error) {
+		if (error == 2) {
+			fprintf(stderr, "usage: %s "
+#ifndef SMALL
+						"[-s]"
+#else /* SMALL */
+						"[-siv] [-p port]"
+#endif /* SMALL */
+				, argv[0]);
+		}
+		server_free(server);
+		exit(error);
+	}
+
+	if (options.syslog)
+		openlog(basename(argv[0]), LOG_CONS | LOG_PERROR, LOG_DAEMON);
+
+	the_store = store_new();
+	if (!the_store) {
+		log_perror("store_new");
+		exit(1);
+	}
 
 	server_context.max_sockets = 64;
 	server_context.on_accept = on_net_accept;
@@ -464,47 +522,15 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	while ((ch = getopt(argc, argv, "sv")) != -1)
-		switch (ch) {
-		case 's':
-			options.syslog = 1;
-			break;
-		case 'v':
-			options.verbose++;
-			break;
-		case '?':
-			error = 2;
-			break;
-		}
-	if (error) {
-		if (error == 2) {
-			fprintf(stderr, "usage: %s [<uri>...]\n",
-				argv[0]);
-			fprintf(stderr, "uris:\n"
-					"\tunix[:<path>]\n"
-					"\ttcp[://localhost[:port]]\n"
-					"\tstdin\n");
-		}
-		server_free(server);
-		exit(error);
-	}
-
-	if (options.syslog)
-		openlog(basename(argv[0]), LOG_CONS | LOG_PERROR, LOG_DAEMON);
-
 #ifndef SMALL
-	if (server_add_fd(server, STDIN_FILENO, &stdin_listener) == -1) {
-		log_perror("[stdin] server_add_fd");
-		exit(1);
-	}
-#endif
-
-	the_store = store_new();
+	if (options.stdin)
+		add_stdin_listener(server);
+#endif /* !SMALL */
 
 	while ((ret = server_poll(server, -1)) > 0)
 		if (ret == -1)
 			log_perror("poll");
-	if (ret == 0 && options.verbose)
+	if (ret == 0 && VERBOSE)
 		on_net_error(server, "no listeners!");
 
 	server_free(server);
