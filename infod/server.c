@@ -56,13 +56,15 @@ is_listener(const struct server *server, int i)
 	return server->socket[i].is_listener;
 }
 
-static const char *
+const char *
 listener_peername(struct listener *listener, int fd, char *buf, size_t sz)
 {
 	if (fd == -1)
 		return "closed";
-	if (!listener || !listener->peername)
+	if (!listener)
 		return "?";
+	if (!listener->peername)
+		return listener->name;
 	return listener->peername(fd, buf, sz);
 }
 
@@ -164,12 +166,12 @@ server_add_socket(struct server *server, int fd)
 
 /* closes and frees the <fd,proto> at index i */
 static void
-server_del_socket(struct server *server, unsigned int i)
+close_delete_socket(struct server *server, unsigned int i)
 {
 	unsigned int last = server->n - 1;
 	struct server_socket *socket = &server->socket[i];
 	unsigned int max_sockets = server->context->max_sockets;
-	char namebuf[256];
+	char namebuf[PEERNAMESZ];
 
 	assert(!is_listener(server, i));
 
@@ -216,7 +218,7 @@ server_accept(struct server *server, int listen_fd, struct listener *listener)
 
 	if (server_add_fd(server, fd, listener) == -1) {
 		if (close(fd) == -1) {
-			char namebuf[256];
+			char namebuf[PEERNAMESZ];
 			int e = errno;
 			on_error(server, "[%s] close: %s",
 				listener_peername(listener, fd,
@@ -231,6 +233,9 @@ server_add_fd(struct server *server, int fd, struct listener *listener)
 {
 	int i;
 	void *data;
+
+	if (fd == -1)
+		return -1;
 
 	i = server_add_socket(server, fd);
 	if (i == -1)
@@ -291,18 +296,18 @@ server_poll(struct server *server, int timeout)
 			server->socket[i].data, server->pollfd[i].fd);
 		if (len > 0)
 			i++;
-		else {
-			if (len == -1) {
-				int e = errno;
-				char namebuf[256];
-				on_error(server, "[%s] on_ready: %s",
-					listener_peername(
-						server->socket[i].listener,
-						server->pollfd[i].fd,
-						namebuf, sizeof namebuf),
-					strerror(e));
-			}
-			server_del_socket(server, i);
+		else if (len == 0)
+			close_delete_socket(server, i);
+		else /* len == -1 */ {
+			int e = errno;
+			char namebuf[PEERNAMESZ];
+			on_error(server, "[%s] on_ready: %s",
+				listener_peername(
+					server->socket[i].listener,
+					server->pollfd[i].fd,
+					namebuf, sizeof namebuf),
+				strerror(e));
+			close_delete_socket(server, i);
 		}
 	}
 	return ret;

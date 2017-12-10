@@ -11,11 +11,16 @@
 #include <assert.h>
 #include <errno.h>
 #include <syslog.h>
+#include <netdb.h>
 
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/uio.h>
 
 #include "server.h"
 #include "../lib/proto.h"
+#include "../lib/sockunix.h"
+#include "../lib/socktcp.h"
 #include "store.h"
 #include "match.h"
 #include "list.h"
@@ -37,6 +42,9 @@ static struct options {
 
 /* Single store */
 static struct store *the_store;
+
+/* pre-framed unix listener */
+static struct listener unix_listener = { "unix", NULL };
 
 /* Client connections */
 struct client {
@@ -206,6 +214,12 @@ static void
 on_net_close(struct server *s, void *c, struct listener *l)
 {
 	struct client *client = c;
+	if (VERBOSE) {
+		char namebuf[PEERNAMESZ];
+		log_msgf(LOG_INFO, "[%s] closed",
+			listener_peername(l, client->fd,
+				namebuf, sizeof namebuf));
+	}
 	client_free(client);
 }
 
@@ -414,20 +428,29 @@ static void *
 on_net_accept(struct server *s, int fd, struct listener *l)
 {
 	struct client *client;
+	char namebuf[PEERNAMESZ];
+
+	if (VERBOSE)
+		log_msgf(LOG_INFO, "[%s] connected",
+			listener_peername(l, fd, namebuf, sizeof namebuf));
 
 	client = client_new(fd);
 	if (!client) { /* failed to allocate */
-		char namebuf[256];
 		const char *estr = strerror(errno);
 		log_msgf(LOG_WARNING, "[%s] client_new(): %s",
-			l ? l->peername(fd, namebuf, sizeof namebuf) : "?",
+			listener_peername(l, fd, namebuf, sizeof namebuf),
 			estr);
 		shutdown_read(fd);
 		return NULL;
 	}
+
+	if (l == &unix_listener)
+		proto_set_mode(client->proto, PROTO_MODE_FRAMED);
+
 	proto_set_on_error(client->proto, on_proto_error);
 	proto_set_on_sendv(client->proto, on_net_sendv);
 	proto_set_on_input(client->proto, on_app_input);
+
 	return client;
 }
 
@@ -440,15 +463,85 @@ basename(const char *name)
 	return s ? s + 1 : name;
 }
 
-#ifndef SMALL
-/* A fake listener context for the stdin fd */
-static const char *
-stdin_peername(int fd, char *buf, size_t sz)
+static void
+add_unix_listener(struct server *server)
 {
-	return "stdin";
+	int fd = sockunix_listen();
+
+	if (server_add_listener(server, fd, &unix_listener) == -1) {
+		log_perror("unix listener");
+		exit(1);
+	}
 }
-static struct listener stdin_listener = { "stdin", stdin_peername };
+
+#ifndef SMALL
+static void
+add_stdin_listener(struct server *server)
+{
+	static struct listener stdin_listener = { "stdin", NULL };
+
+	if (server_add_fd(server, STDIN_FILENO, &stdin_listener) == -1) {
+		log_perror("stdin listener");
+		exit(1);
+	}
+}
+
+static void
+add_tcp_listeners(struct server *server)
+{
+	static struct listener tcp_listener = { "tcp", tcp_peername };
+	struct addrinfo *ais = NULL;
+	struct addrinfo *ai;
+	int count = 0;
+
+	if (tcp_server_addrinfo(options.port, &ais) == -1) {
+		log_perror("tcp_server_addrinfo");
+		exit(1);
+	}
+	for (ai = ais; ai; ai = ai->ai_next) {
+		int fd = socket(ai->ai_family, ai->ai_socktype,
+			ai->ai_protocol);
+		if (fd == -1) {
+			log_msgf(LOG_ERR, "socket: %s", strerror(errno));
+			continue;
+		}
+
+#ifdef __linux__
+		/* getaddrinfo() returns AF_INET and AF_INET6 addresses
+		 * for the same port, but Linux shares TCP port space
+		 * between IPv4 and v6 by default, so these collide.
+		 * Defeat this with IPV6_V6ONLY */
+		if (ai->ai_family == AF_INET6) {
+			int val = 1;
+			if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
+				&val, sizeof val) == -1)
+			    log_msgf(LOG_WARNING, "IPV6_V6ONLY: %s",
+				strerror(errno));;
+		}
 #endif
+
+		if (bind(fd, ai->ai_addr, ai->ai_addrlen) == -1) {
+			log_msgf(LOG_ERR, "bind: %s", strerror(errno));
+			close(fd);
+			continue;
+		}
+		if (listen(fd, 5) == -1) {
+			log_msgf(LOG_ERR, "listen: %s", strerror(errno));
+			close(fd);
+			continue;
+		}
+		if (server_add_listener(server, fd, &tcp_listener) == -1) {
+			log_perror("tcp listener");
+			close(fd);
+			continue;
+		}
+		count++;
+	}
+	freeaddrinfo(ais);
+	if (!count)
+		exit(1);
+}
+#endif /* !SMALL */
 
 int
 main(int argc, char *argv[])
@@ -497,7 +590,6 @@ main(int argc, char *argv[])
 #endif /* SMALL */
 				, argv[0]);
 		}
-		server_free(server);
 		exit(error);
 	}
 
@@ -525,7 +617,9 @@ main(int argc, char *argv[])
 #ifndef SMALL
 	if (options.stdin)
 		add_stdin_listener(server);
+	add_tcp_listeners(server);
 #endif /* !SMALL */
+	add_unix_listener(server);
 
 	while ((ret = server_poll(server, -1)) > 0)
 		if (ret == -1)

@@ -83,3 +83,9 @@ int shutdown_read(int fd);
 
 /* Closes all client sockets, listeners and deallocates resources */
 void server_free(struct server *server);
+
+/* Return a safe string describing the fd which was accepted by listener */
+const char *listener_peername(struct listener *listener, int fd,
+	char *buf, size_t sz);
+#define PEERNAMESZ 256
+

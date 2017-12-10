@@ -29,6 +29,8 @@ LIB_OBJS += lib/protofram.o
 LIB_OBJS += lib/prototext.o
 LIB_OBJS += lib/protobin.o
 LIB_OBJS += lib/rxbuf.o
+LIB_OBJS += lib/sockunix.o
+LIB_OBJS += lib/socktcp.o
 PICFLAGS = -fPIC
 lib/libinfo3.a: lib/libinfo3.a($(LIB_OBJS))
 lib/libinfo3.so: $(LIB_OBJS:.o=.po)
