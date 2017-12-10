@@ -143,7 +143,8 @@ again:
 			if (strcasecmp(cmdtab[i].word, t->cmd) == 0)
 				break;
 		if (!cmdtab[i].word) {
-			proto_output_error(p, "unknown command '%s'", t->cmd);
+			proto_output_error(p,
+				"unknown command '%s', try 'help'", t->cmd);
 			t->state = T_ERROR;
 			goto again;
 		}
