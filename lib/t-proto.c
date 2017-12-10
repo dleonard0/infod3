@@ -462,8 +462,8 @@ test_binary_proto()
 	assert_mock_on_input(p, MSG_PONG, "");
 	assert_proto_recv(p, "\x82\0\1x");
 	assert_mock_on_input(p, MSG_PONG, "x");
-	assert_proto_recv(p, "\x83\0\5error");
-	assert_mock_on_input(p, MSG_ERROR, "error");
+	assert_proto_recv(p, "\x83\0\6\144error");
+	assert_mock_on_input(p, MSG_ERROR, "\144error");
 
 	/* Exercise sending all of the message types [to net] */
 	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
@@ -511,8 +511,8 @@ test_binary_proto()
 	assert_mock_on_sendv(p, "\x82\0\0");
 	assert(proto_output(p, MSG_PONG, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "\x82\0\4abcd");
-	assert(proto_output(p, MSG_ERROR, "%s", "abcd") != -1);
-	assert_mock_on_sendv(p, "\x83\0\4abcd");
+	assert(proto_output(p, MSG_ERROR, "%c%s", 255, "abcd") != -1);
+	assert_mock_on_sendv(p, "\x83\0\5\377abcd");
 
 	/* Exercise some malformed formats [to net] */
 	assert(proto_output(p, 0, "%%") == -1);
@@ -531,6 +531,10 @@ test_binary_proto()
 	assert(errno == ENOMEM);
 	assert_no_mock_on_sendv();
 	mock_on_error_clear();
+
+	/* Test the error helper */
+	assert(proto_output_error(p, 255, "%s%d", "a", 1) == -1);
+	assert_mock_on_sendv(p, "\x83\0\3\377a1");
 
 	/* Test returning an unrecoverable error from on_input() */
 	mock_on_input.retval = -1;
@@ -652,16 +656,16 @@ test_text_proto()
 	assert_mock_on_input(p, MSG_PONG, "");
 	assert_proto_recv(p, "pong  xyz \n");
 	assert_mock_on_input(p, MSG_PONG, "xyz");
-	assert_proto_recv(p, "error text\n");
-	assert_mock_on_input(p, MSG_ERROR, "text");
-	assert_proto_recv(p, "error \"\"\n");
-	assert_mock_on_input(p, MSG_ERROR, "");
+	assert_proto_recv(p, "error 255 text\n");
+	assert_mock_on_input(p, MSG_ERROR, "\377text");
+	assert_proto_recv(p, "error 100 \"\"\n");
+	assert_mock_on_input(p, MSG_ERROR, "\144");
 
 	/* Exercise recveing a bad command [from net] */
 	assert_proto_recv(p, "commit foo\r\n");
 	assert_no_mock_on_input();
-	assert_mock_on_sendv(p, "ERROR \"unexpected arg for 'commit'\"\r\n");
-
+	assert_mock_on_sendv(p, "ERROR 101 "
+		"\"unexpected arg for 'commit'\"\r\n");
 
 	/* Exercise sensing messages to the net */
 	assert(proto_output(p, CMD_HELLO, "%c %s", 0, "hello") != -1);
@@ -713,22 +717,26 @@ test_text_proto()
 	assert_mock_on_sendv(p, "PONG\r\n");
 	assert(proto_output(p, MSG_PONG, "%s", "abcd") != -1);
 	assert_mock_on_sendv(p, "PONG \"abcd\"\r\n");
-	assert(proto_output(p, MSG_ERROR, "%s", "abcd") != -1);
-	assert_mock_on_sendv(p, "ERROR \"abcd\"\r\n");
+	assert(proto_output(p, MSG_ERROR, "%c%s", 255, "abcd") != -1);
+	assert_mock_on_sendv(p, "ERROR 255 \"abcd\"\r\n");
 
 	/* Test sending the largest string possible */
 	assert(sizeof Mega >= 0xffff);
-	assert(proto_output(p, MSG_ERROR, "%*s", 0xffff, Mega) != -1);
+	assert(proto_output(p, CMD_PING, "%*s", 0xffff, Mega) != -1);
 	assert(mock_on_sendv.counter > 0);
 	assert(mock_on_sendv.datalen ==
-		strlen("ERROR \"") + 0xffff + strlen("\"\r\n"));
+		strlen("PING \"") + 0xffff + strlen("\"\r\n"));
 	assert(memcmp(mock_on_sendv.data,
-		"ERROR \"", strlen("ERROR \"")) == 0);
-	assert(memcmp(mock_on_sendv.data + strlen("ERROR \""),
+		"PING \"", strlen("PING \"")) == 0);
+	assert(memcmp(mock_on_sendv.data + strlen("PING \""),
 		Mega, 0xffff) == 0);
-	assert(memcmp(mock_on_sendv.data + strlen("ERROR \"") + 0xffff,
+	assert(memcmp(mock_on_sendv.data + strlen("PING \"") + 0xffff,
 		"\"\r\n", strlen("\"\r\n")) == 0);
 	mock_on_sendv_clear();
+
+	/* Test the error helper */
+	assert(proto_output_error(p, 255, "%s%d", "a", 1) == -1);
+	assert_mock_on_sendv(p, "ERROR 255 \"a1\"\r\n");
 
 	/* Exercise some malformed formats [to net] */
 	assert(proto_output(p, 0, "%%") == -1);
@@ -783,7 +791,7 @@ test_framed_proto()
 	assert_mock_on_sendv(p, "\x00\0hello");
 
 	/* Test sending and receiving the largest units */
-	assert(proto_output(p, MSG_ERROR, "%*s", 0xffff, Mega) != -1);
+	assert(proto_output(p, CMD_PING, "%*s", 0xffff, Mega) != -1);
 	assert(mock_on_sendv.counter > 0);
 	assert(mock_on_sendv.datalen == 1 + 0xffff);
 	assert(memcmp(mock_on_sendv.data + 1, Mega, 0xffff) == 0);
@@ -796,6 +804,10 @@ test_framed_proto()
 	assert(mock_on_input.datalen == 0xffff);
 	assert(memcmp(mock_on_input.data, Mega, 0xffff) == 0);
 	mock_on_input_clear();
+
+	/* Test the error helper */
+	assert(proto_output_error(p, 255, "%s%d", "a", 1) == -1);
+	assert_mock_on_sendv(p, "\x83\377a1");
 
 	/* Test returning an unrecoverable error from on_input() */
 	mock_on_input.retval = -1;

@@ -120,7 +120,8 @@ proto_get_mode(struct proto *p)
  * Returns -1, except in PROTO_MODE_TEXT when it returns 1.
  */
 int
-proto_output_error(struct proto *p, const char *fmt, ...)
+proto_output_error(struct proto *p, unsigned char code,
+	const char *fmt, ...)
 {
 	va_list ap;
 	char buf[16384];
@@ -128,11 +129,11 @@ proto_output_error(struct proto *p, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof buf, fmt, ap);
 	va_end(ap);
-	if (proto_output(p, MSG_ERROR, "%s", buf) < 0)
+	if (proto_output(p, MSG_ERROR, "%c%s", code, buf) < 0)
 		return -1;
 #ifndef SMALL
-	/* When in text mode, keep the channel open */
-	if (p->mode == PROTO_MODE_TEXT)
+	/* When in text mode and a client error, keep the channel open */
+	if (p->mode == PROTO_MODE_TEXT && code != PROTO_ERROR_INTERNAL)
 		return 1;
 #endif
 	return -1;

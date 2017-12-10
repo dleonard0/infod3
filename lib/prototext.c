@@ -37,7 +37,7 @@ static struct {
 	{ "VERSION",	MSG_VERSION, "i|t" },
 	{ "INFO",	MSG_INFO, "t|0t" },
 	{ "PONG",	MSG_PONG, "|t" },
-	{ "ERROR",	MSG_ERROR, "t" },
+	{ "ERROR",	MSG_ERROR, "it" },
 	{ "HELP",	PSEUDO_HELP, "" },
 	{ "H",		PSEUDO_HELP, "" },
 	{}
@@ -61,7 +61,7 @@ static const char help_text[] =
 	" VERSION <int> [<serverid>] - server's selected protocol\r\n"
 	" INFO <key> [<value>]       - store content; no <value> deleted\r\n"
 	" PONG [<string>]            - reply to PING\r\n"
-	" ERROR <text>               - error message\r\n"
+	" ERROR <int> <text>         - error message\r\n"
 	"\r\n"
 	"Quoting:\r\n"
 	" Quoted strings begin and end with \".\r\n"
@@ -131,7 +131,8 @@ again:
 			/* accumulate command word characters */
 			t->cmd[t->cmdlen++] = ch;
 			if (t->cmdlen >= sizeof t->cmd) {
-				proto_output_error(p, "long command");
+				proto_output_error(p, PROTO_ERROR_BAD_MSG,
+					"long command");
 				t->state = T_ERROR;
 				goto again;
 			}
@@ -143,7 +144,7 @@ again:
 			if (strcasecmp(cmdtab[i].word, t->cmd) == 0)
 				break;
 		if (!cmdtab[i].word) {
-			proto_output_error(p,
+			proto_output_error(p, PROTO_ERROR_BAD_MSG,
 				"unknown command '%s', try 'help'", t->cmd);
 			t->state = T_ERROR;
 			goto again;
@@ -167,7 +168,8 @@ again:
 		if (ch == '\n' || ch == '\r') {
 			/* end of command line */
 			if (!t->optional && *t->fmt) {
-				proto_output_error(p, "missing arg for '%s'", t->cmd);
+				proto_output_error(p, PROTO_ERROR_BAD_ARG,
+					"missing arg for '%s'", t->cmd);
 			} else if (p->on_input) {
 				int ret;
 				/* pass up full input command */
@@ -180,7 +182,8 @@ again:
 			}
 			t->state = T_BOL;
 		} else if (!*t->fmt) {
-			proto_output_error(p, "unexpected arg for '%s'", t->cmd);
+			proto_output_error(p, PROTO_ERROR_BAD_ARG,
+				"unexpected arg for '%s'", t->cmd);
 			t->state = T_ERROR;
 			goto again;
 		} else {
@@ -204,7 +207,8 @@ again:
 		if (ch >= '0' && ch <= '9') {
 			t->intval = t->intval * 10 + ch - '0';
 			if (t->intval > 255) {
-				proto_output_error(p, "integer overflow");
+				proto_output_error(p, PROTO_ERROR_BAD_MSG,
+					"integer overflow");
 				t->state = T_ERROR;
 				goto again;
 			}
@@ -238,7 +242,8 @@ again:
 	case T_QSTR:
 		/* consuming quoted string */
 		if (ch == '\r' || ch == '\n') {
-			proto_output_error(p, "unclosed \"");
+			proto_output_error(p, PROTO_ERROR_BAD_MSG,
+				"unclosed \"");
 			t->state = T_BOL;
 		} else if (ch == '\\') {
 			t->counter = 3;
@@ -254,7 +259,8 @@ again:
 	case T_QOCT:
 		/* consuming quoted octal escape */
 		if (ch < '0' || ch > '7') {
-			proto_output_error(p, "expected octal after backslash");
+			proto_output_error(p, PROTO_ERROR_BAD_MSG,
+				"expected octal after backslash");
 			t->state = T_ERROR;
 			goto again;
 		}

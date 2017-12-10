@@ -131,8 +131,15 @@ int proto_outputv(struct proto *p, unsigned char msg, const char *fmt,
 	va_list ap);
 
 /* Sends a MSG_ERROR to the peer, fmt is human text */
-__attribute__((format(printf, 2, 3)))
-int proto_output_error(struct proto *p, const char *fmt, ...);
+__attribute__((format(printf, 3, 4)))
+int proto_output_error(struct proto *p, unsigned char code,
+	const char *fmt, ...);
+
+#define PROTO_ERROR_BAD_MSG		100
+#define PROTO_ERROR_BAD_ARG		101
+#define PROTO_ERROR_TOO_BIG		102
+#define PROTO_ERROR_BAD_SEQ		103
+#define PROTO_ERROR_INTERNAL		255
 
 struct iovec;
 

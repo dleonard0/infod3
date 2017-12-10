@@ -116,13 +116,24 @@ Server messages
 	    PONG messages are only sent as a response to PING
 	    commands.
 
-	ERROR <text>
+	ERROR <int> <text>
 
 	    An ERROR message can be sent by the server at any time.
 	    The text is for human consumption and a client should
 	    log the message.
 	    The server may close the connection immediately after
 	    sending this message.
+
+	    The integer 0-255 represent an error groups. The error groups
+	    are currently:
+
+		100	Unknown or malformed message
+		101	Bad message parameter
+		102	Buffer overflow
+		103     Bad command state
+		255	Internal server error
+
+	    A client recieving error 255 MAY retry later.
 
 Patterns
 
