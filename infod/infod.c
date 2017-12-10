@@ -580,6 +580,9 @@ main(int argc, char *argv[])
 			error = 2;
 			break;
 		}
+
+	if (optind < argc)
+		error = 2; /* excess arguments */
 	if (error) {
 		if (error == 2) {
 			fprintf(stderr, "usage: %s "
