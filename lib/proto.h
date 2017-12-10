@@ -94,6 +94,8 @@ void *proto_get_udata(struct proto *p);
  */
 int proto_recv(struct proto *p, const void *net, unsigned int netlen);
 
+#define PROTO_RECVSZ 65536
+
 /* Sets the callback for received decoded messages.
  *
  * on_input():
@@ -155,7 +157,7 @@ void proto_set_on_sendv(struct proto *p,
     int (*on_sendv)(struct proto *p, const struct iovec *iovs, int niovs));
 
 /* Sets an upcall handler to receive error messages generated
- * within the protocol.
+ * within the protocol (This is NOT from server MSG_ERROR).
  * If NULL or unset, messages will be sent to stderr. */
 void proto_set_on_error(struct proto *p,
     void (*on_error)(struct proto *p, const char *msg));

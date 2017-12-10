@@ -241,7 +241,7 @@ on_net_ready(struct server *s, void *c, int fd)
 	/* Read network data into a buffer on the stack, and
 	 * deliver the buffer to the protocol decoder. */
 	struct client *client = c;
-	char buf[65536 + 1];
+	char buf[PROTO_RECVSZ + 1];
 	int len = read(fd, buf, sizeof buf - 1);
 	if (len < 0)
 		return -1;
@@ -493,9 +493,12 @@ add_tcp_listeners(struct server *server)
 	struct addrinfo *ais = NULL;
 	struct addrinfo *ai;
 	int count = 0;
+	int ret;
 
-	if (tcp_server_addrinfo(options.port, &ais) == -1) {
-		log_perror("tcp_server_addrinfo");
+	ret = tcp_server_addrinfo(options.port, &ais);
+	if (ret != 0) {
+		log_msgf(LOG_ERR, "tcp_server_addrinfo: %s",
+			gai_strerror(ret));
 		exit(1);
 	}
 	for (ai = ais; ai; ai = ai->ai_next) {

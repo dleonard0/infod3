@@ -3,7 +3,7 @@ CFLAGS += -ggdb -O0 -Wall
 CPPFLAGS += -I.
 #CPPFLAGS += -DSMALL              # disables text protocol and help
 
-default: check infod/infod
+default: check infod/infod info/info
 
 TESTS += t-proto
 t-store: infod/t-store.o infod/store.o
@@ -31,6 +31,7 @@ LIB_OBJS += lib/protobin.o
 LIB_OBJS += lib/rxbuf.o
 LIB_OBJS += lib/sockunix.o
 LIB_OBJS += lib/socktcp.o
+LIB_OBJS += lib/info.o
 PICFLAGS = -fPIC
 lib/libinfo3.a: lib/libinfo3.a($(LIB_OBJS))
 lib/libinfo3.so: $(LIB_OBJS:.o=.po)
@@ -46,6 +47,11 @@ INFOD_OBJS += infod/match.o
 INFOD_OBJS += infod/server.o
 infod/infod: $(INFOD_OBJS) lib/libinfo3.so
 	$(LINK.c) $(OUTPUT_OPTION) $(INFOD_OBJS) $(LIBS)
+
+
+INFO_OBJS = info/info.o
+info/info: $(INFO_OBJS) lib/libinfo3.so
+	$(LINK.c) $(OUTPUT_OPTION) $(INFO_OBJS) $(LIBS)
 
 clean:
 	rm -f lib/*.o lib/*.po
