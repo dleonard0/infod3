@@ -60,8 +60,8 @@ msg_str(int id)
 	case CMD_HELLO: return "CMD_HELLO";
 	case CMD_SUB: return "CMD_SUB";
 	case CMD_UNSUB: return "CMD_UNSUB";
-	case CMD_GET: return "CMD_GET";
-	case CMD_PUT: return "CMD_PUT";
+	case CMD_READ: return "CMD_READ";
+	case CMD_WRITE: return "CMD_WRITE";
 	case CMD_BEGIN: return "CMD_BEGIN";
 	case CMD_COMMIT: return "CMD_COMMIT";
 	case CMD_PING: return "CMD_PING";
@@ -438,11 +438,11 @@ test_binary_proto()
 	assert_proto_recv(p, "\x02\0\4yeah");
 	assert_mock_on_input(p, CMD_UNSUB, "yeah");
 	assert_proto_recv(p, "\x03\0\3key");
-	assert_mock_on_input(p, CMD_GET, "key");
+	assert_mock_on_input(p, CMD_READ, "key");
 	assert_proto_recv(p, "\x04\0\3key");
-	assert_mock_on_input(p, CMD_PUT, "key");
+	assert_mock_on_input(p, CMD_WRITE, "key");
 	assert_proto_recv(p, "\x04\0\013key\0val\0nul");
-	assert_mock_on_input(p, CMD_PUT, "key\0val\0nul");
+	assert_mock_on_input(p, CMD_WRITE, "key\0val\0nul");
 	assert_proto_recv(p, "\x05\0\0");
 	assert_mock_on_input(p, CMD_BEGIN, "");
 	assert_proto_recv(p, "\x06\0\0");
@@ -474,17 +474,17 @@ test_binary_proto()
 	assert_mock_on_sendv(p, "\x01\0\1*");
 	assert(proto_output(p, CMD_UNSUB, "%s", "*") != -1);
 	assert_mock_on_sendv(p, "\x02\0\1*");
-	assert(proto_output(p, CMD_GET, "%s", "key") != -1);
+	assert(proto_output(p, CMD_READ, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "\x03\0\3key");
 
-	/* exercising CMD_PUT in its various ways [to net] */
-	assert(proto_output(p, CMD_PUT, "%s", "key") != -1);
+	/* exercising CMD_WRITE in its various ways [to net] */
+	assert(proto_output(p, CMD_WRITE, "%s", "key") != -1);
 	assert_mock_on_sendv(p, "\x04\0\3key");
-	assert(proto_output(p, CMD_PUT, "%s%c%s", "key", 0, "val") != -1);
+	assert(proto_output(p, CMD_WRITE, "%s%c%s", "key", 0, "val") != -1);
 	assert_mock_on_sendv(p, "\x04\0\7key\0val");
-	assert(proto_output(p, CMD_PUT, "%*s%c%s", 3, "key", 0, "val") !=-1);
+	assert(proto_output(p, CMD_WRITE, "%*s%c%s", 3, "key", 0, "val") !=-1);
 	assert_mock_on_sendv(p, "\x04\0\7key\0val");
-	assert(proto_output(p, CMD_PUT, "%*s", 7, "key\0val") != -1);
+	assert(proto_output(p, CMD_WRITE, "%*s", 7, "key\0val") != -1);
 	assert_mock_on_sendv(p, "\x04\0\7key\0val");
 	assert(proto_output(p, CMD_BEGIN, "") != -1);
 	assert_mock_on_sendv(p, "\x05\0\0");
@@ -614,16 +614,16 @@ test_text_proto()
 	assert_mock_on_input(p, CMD_SUB, "*");
 	assert_proto_recv(p, "unSUB *\n");
 	assert_mock_on_input(p, CMD_UNSUB, "*");
-	assert_proto_recv(p, "GET key\n");
-	assert_mock_on_input(p, CMD_GET, "key");
-	assert_proto_recv(p, "put key\n");
-	assert_mock_on_input(p, CMD_PUT, "key");
-	assert_proto_recv(p, "put key value\n");
-	assert_mock_on_input(p, CMD_PUT, "key\0value");
-	assert_proto_recv(p, "put key \"\"\n");
-	assert_mock_on_input(p, CMD_PUT, "key\0");
-	assert_proto_recv(p, "put \"key\" \"\"\n");
-	assert_mock_on_input(p, CMD_PUT, "key\0");
+	assert_proto_recv(p, "READ key\n");
+	assert_mock_on_input(p, CMD_READ, "key");
+	assert_proto_recv(p, "w key\n");
+	assert_mock_on_input(p, CMD_WRITE, "key");
+	assert_proto_recv(p, "write key value\n");
+	assert_mock_on_input(p, CMD_WRITE, "key\0value");
+	assert_proto_recv(p, "write key \"\"\n");
+	assert_mock_on_input(p, CMD_WRITE, "key\0");
+	assert_proto_recv(p, "WRITE \"key\" \"\"\n");
+	assert_mock_on_input(p, CMD_WRITE, "key\0");
 	assert_proto_recv(p, "begin\r\n");
 	assert_mock_on_input(p, CMD_BEGIN, "");
 	assert_proto_recv(p, "commit\r\n");
@@ -672,18 +672,18 @@ test_text_proto()
 	assert_mock_on_sendv(p, "SUB \"*\"\r\n");
 	assert(proto_output(p, CMD_UNSUB, "%s", "*") != -1);
 	assert_mock_on_sendv(p, "UNSUB \"*\"\r\n");
-	assert(proto_output(p, CMD_GET, "%s", "key") != -1);
-	assert_mock_on_sendv(p, "GET \"key\"\r\n");
+	assert(proto_output(p, CMD_READ, "%s", "key") != -1);
+	assert_mock_on_sendv(p, "READ \"key\"\r\n");
 
-	/* exercising CMD_PUT in its various ways [to net] */
-	assert(proto_output(p, CMD_PUT, "%s", "key") != -1);
-	assert_mock_on_sendv(p, "PUT \"key\"\r\n");
-	assert(proto_output(p, CMD_PUT, "%s%c%s", "key", 0, "val") != -1);
-	assert_mock_on_sendv(p, "PUT \"key\" \"val\"\r\n");
-	assert(proto_output(p, CMD_PUT, "%*s%c%s", 3, "key", 0, "val") !=-1);
-	assert_mock_on_sendv(p, "PUT \"key\" \"val\"\r\n");
-	assert(proto_output(p, CMD_PUT, "%*s", 7, "key\0val") != -1);
-	assert_mock_on_sendv(p, "PUT \"key\" \"val\"\r\n");
+	/* exercising CMD_WRITE in its various ways [to net] */
+	assert(proto_output(p, CMD_WRITE, "%s", "key") != -1);
+	assert_mock_on_sendv(p, "WRITE \"key\"\r\n");
+	assert(proto_output(p, CMD_WRITE, "%s%c%s", "key", 0, "val") != -1);
+	assert_mock_on_sendv(p, "WRITE \"key\" \"val\"\r\n");
+	assert(proto_output(p, CMD_WRITE, "%*s%c%s", 3, "key", 0, "val") !=-1);
+	assert_mock_on_sendv(p, "WRITE \"key\" \"val\"\r\n");
+	assert(proto_output(p, CMD_WRITE, "%*s", 7, "key\0val") != -1);
+	assert_mock_on_sendv(p, "WRITE \"key\" \"val\"\r\n");
 	assert(proto_output(p, CMD_BEGIN, "") != -1);
 	assert_mock_on_sendv(p, "BEGIN\r\n");
 	assert(proto_output(p, CMD_COMMIT, "") != -1);

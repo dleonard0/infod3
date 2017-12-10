@@ -19,19 +19,27 @@ static struct {
 	unsigned char id;
 	const char *fmt;
 } cmdtab[] = {
-	{ "HELLO", CMD_HELLO, "i|t" },
-	{ "SUB", CMD_SUB, "t" },
-	{ "UNSUB", CMD_UNSUB, "t" },
-	{ "GET", CMD_GET, "t" },
-	{ "PUT", CMD_PUT, "t|0t" },
-	{ "BEGIN", CMD_BEGIN, "" },
-	{ "COMMIT", CMD_COMMIT, "" },
-	{ "PING", CMD_PING, "|t" },
-	{ "VERSION", MSG_VERSION, "i|t" },
-	{ "INFO", MSG_INFO, "t|0t" },
-	{ "PONG", MSG_PONG, "|t" },
-	{ "ERROR", MSG_ERROR, "t" },
-	{ "HELP", PSEUDO_HELP, "" },
+	{ "HELLO",	CMD_HELLO, "i|t" },
+	{ "SUB",	CMD_SUB, "t" },
+	{ "S",		CMD_SUB, "t" },
+	{ "UNSUB",	CMD_UNSUB, "t" },
+	{ "U",		CMD_UNSUB, "t" },
+	{ "READ",	CMD_READ, "t" },
+	{ "R",		CMD_READ, "t" },
+	{ "WRITE",	CMD_WRITE, "t|0t" },
+	{ "W",		CMD_WRITE, "t|0t" },
+	{ "BEGIN",	CMD_BEGIN, "" },
+	{ "B",		CMD_BEGIN, "" },
+	{ "COMMIT",	CMD_COMMIT, "" },
+	{ "C",		CMD_COMMIT, "" },
+	{ "PING",	CMD_PING, "|t" },
+	{ "P",		CMD_PING, "|t" },
+	{ "VERSION",	MSG_VERSION, "i|t" },
+	{ "INFO",	MSG_INFO, "t|0t" },
+	{ "PONG",	MSG_PONG, "|t" },
+	{ "ERROR",	MSG_ERROR, "t" },
+	{ "HELP",	PSEUDO_HELP, "" },
+	{ "H",		PSEUDO_HELP, "" },
 	{}
 };
 
@@ -40,12 +48,14 @@ static const char help_text[] =
 	" hello <int> [<clientid>]   - negotiate protocol\r\n"
 	" sub <pattern>              - subscribe to pattern\r\n"
 	" unsub <pattern>            - remove previous subscription\r\n"
-	" get <key>                  - request stored INFO\r\n"
-	" put <key> [<value>]        - update store\r\n"
+	" read <key>                 - read from store, request INFO\r\n"
+	" write <key> [<value>]      - write to store\r\n"
 	" begin                      - begin command group\r\n"
 	" commit                     - execute command group\r\n"
 	" ping [<string>]            - request a PONG reply\r\n"
 	" help                       - this help text\r\n"
+	"\r\n"
+	"Most commands may be abbreviated to their first letter\r\n"
 	"\r\n"
 	"Reply messages:\r\n"
 	" version <int> [<serverid>] - server's selected protocol\r\n"

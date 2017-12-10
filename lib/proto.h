@@ -55,8 +55,8 @@ struct proto;
 #define CMD_HELLO		0x00	/* %c[%s], <id>[,<text>] */
 #define CMD_SUB			0x01	/* %s, <pattern> */
 #define CMD_UNSUB		0x02	/* %s, <pattern> */
-#define CMD_GET			0x03	/* %s, <key> */
-#define CMD_PUT			0x04	/* %s, <key>
+#define CMD_READ		0x03	/* %s, <key> */
+#define CMD_WRITE		0x04	/* %s, <key>
 					 | %s%c%*s <key>,0,<value>
 					 | %*s     <key\0val> */
 #define CMD_BEGIN		0x05

@@ -11,7 +11,7 @@ Start your server.
 ## Storing and retrieving a value
 
     $ info -w name=Tim
-    $ info name
+    $ info -r name
     Tim
 
 We just stored the value *Tim* with the key *name*
@@ -21,34 +21,40 @@ If you thought that was cool, hold onto your pants.
 We're going to do it again using a TCP interface:
 
     $ nc localhost 26931
-    put name Fred
-    get name
+    w name Fred
+    r name
     INFO "name" "Fred"
     ^C
-    
-    $ info name
+
+We typed `r` and `w` commands and the server responded with `INFO`.
+Case in this channel doesn't matter actually.
+The `r` and `w` were also aliases for `read` and `write`.
+And the server accepted our unquoted strings, because they were simple.
+This makes command-line experimentation with the protocol easy.
+You can type `help` in that channel too.
+
+The binary interface is much more efficient.
+It's what the CLI tools and library use.
+See [PROTOCOL](PROTOCOL) for details.
+There's a C library for clients of course.
+
+    $ info -r name
     Fred
 
-We typed `put` and `get` in lowercase, and the server's
-reponses came back in uppercase `INFO`, but actually case doesn't matter.
-And the server accepted our unquoted strings, because they were simple.
-That makes experimentation easy.
-
-There is also a binary interface which is much more efficient.
-It's what the CLI tools and library actually use.
-See [PROTOCOL](PROTOCOL) for details.
-
 ## Subscribe-notify
+
+We have two terminal sessions.
+I've inserted blank lines to make the order of responses clear.
 
     $ nc localhost 26931
     sub foo
                                 $ nc localhost 26931
-                                put foo bar
+                                w foo bar
     INFO "foo" "bar"
-                                put foo snort
+                                w foo snort
     INFO "foo" "snort"
     ^C                          ^C
-    $ info -s foo
+    $ info -k -s foo
     foo snort
                                 $ info -d foo
     foo
@@ -56,10 +62,11 @@ See [PROTOCOL](PROTOCOL) for details.
     foo fighters
     ^C
 
-The first 'sub' command subscribed to a key pattern *foo* that matches
-just one key, foo. I could have subscribed to pattern "\*" to see every
-key. The pattern language is glob-like but simpler. Subscriptions are
-canceled when the connection is closed.
+The 'sub' command *subscribes* to a key pattern `foo`.
+That pattern matches exactly one key, foo.
+I could have subscribed to pattern `*` to see every key,
+or `f*` to see every key starting with 'f'.
+The pattern language is glob-like but simpler (see docs).
 
 On the right-hand side I started changing the value of key foo,
 and you can see that the left-hand session was immediately notified of
@@ -67,13 +74,16 @@ those changes.
 The bottom half of the example shows the same thing but using
 the 'info' tool.
 
+Subscriptions only exist in the client channel.
+They are lost when the connection is closed.
+
 ## Transactions
 
     $ nc localhost 26931
     begin
-    get name
-    get foo
-    get quz
+    read name
+    read foo
+    read quz
     ping
     commit
     INFO "name" "Fred"
@@ -86,7 +96,7 @@ The server recorded commands after 'begin' until 'commit'. Then,
 all the recorded commands are run at once, atomically.
 This is for when you want a *coherent* view of multiple
 values, without having to worry that values changed between your
-'get' commands.
+'read' commands.
 
 The CLI tools uses transactions.
 

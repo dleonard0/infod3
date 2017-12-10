@@ -12,8 +12,8 @@ infod3 protocol
 		HELLO <v><text>
 		SUB <pattern>
 		UNSUB <pattern>
-		GET <key>
-		PUT <key> [<value>]
+		READ <key>
+		WRITE <key> [<value>]
 		BEGIN
 		COMMIT
 		PING <id>
@@ -69,11 +69,11 @@ Client Commands
 	    changes.
 	    A server may place a limit on the number of subscriptions.
 
-	GET <key>
+	READ <key>
 
 	    The server will respond with an INFO message for the key.
 
-	PUT <key> [<value>]
+	WRITE <key> [<value>]
 
 	    The server will update the key's value.
 	    Unless a matching subscription is in place, this will
@@ -107,7 +107,7 @@ Server messages
 
 	INFO <key> [<value>]
 
-	    INFO messages are only sent as a result of GET or
+	    INFO messages are only sent as a result of READ or
 	    SUB commands. If the <value> is absent, the key
 	    has been deleted.
 
@@ -137,8 +137,8 @@ Binary form of messages
 		0x00 HELLO       <v><text>
 		0x01 SUB         <pattern>
 		0x02 UNSUB       <pattern>
-		0x03 GET         <key>
-		0x04 PUT         <key>[0x00 <value>]
+		0x03 READ        <key>
+		0x04 WRITE       <key>[0x00 <value>]
 		0x05 BEGIN
 		0x06 COMMIT
 		0x07 PING        <id>
@@ -149,8 +149,8 @@ Binary form of messages
 		0x83 ERROR       <text>
 
 	The <v> version is a single byte. It is 0x00 for this version.
-	The GET message must not contain a NUL (0x00) in its <key>.
-	The PUT and INFO messages will not contain a NULL when the
+	The READ message must not contain a NUL (0x00) in its <key>.
+	The WRITE and INFO messages will not contain a NULL when the
 	message means a key deletion.
 	Each of <key>, <pattern> and <text> are in UTF-8.
 	The <id> used for pings is arbitrary-length binary.
@@ -191,8 +191,8 @@ Text form of messages
 	    <sp>* HELLO [<sp>+ <int> [<sp>+ <text>]] <sp>* <crlf>
 	    <sp>* SUB <sp>+ <pattern> <sp>* <crlf>
 	    <sp>* UNSUB <sp>+ <pattern> <sp>* <crlf>
-	    <sp>* GET <sp>+ <key> <sp>* <crlf>
-	    <sp>* PUT <sp>+ <key> [<sp>+ <value>] <sp>* <crlf>
+	    <sp>* READ <sp>+ <key> <sp>* <crlf>
+	    <sp>* WRITE <sp>+ <key> [<sp>+ <value>] <sp>* <crlf>
 	    <sp>* BEGIN <sp>* <crlf>
 	    <sp>* COMMIT <sp>* <crlf>
 	    <sp>* PING [<sp>+ <ident>] <sp>* <crlf>
@@ -210,6 +210,17 @@ Text form of messages
 	If the client omits the HELLO message, the server must not send
 	a VERSION response. However, the server may assume any version
 	that is compatible with version 0.
+
+    Human clients
+
+	A server may accept the pseudo-command HELP, and reply with
+	any human-oriented response text.
+
+	The server must also accept a single letter aliases for all
+	commands, except HELLO, namely: s (SUB), u (UNSUB), r (READ),
+	w (WRITE), b (BEGIN), c (COMMIT) and p (PING).
+	Client programs using the text protocol should not abbreviate
+	commands.
 
     String quoting
 

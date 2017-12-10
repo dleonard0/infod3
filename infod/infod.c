@@ -339,7 +339,7 @@ on_app_input(struct proto *p, unsigned char msg,
 		client->nsubs--;
 		subscription_free(sub);
 		return 1;
-	case CMD_GET:
+	case CMD_READ:
 		if (contains_nul(data, datalen))
 			return proto_output(p, MSG_ERROR, "%s",
 				"get: invalid key");
@@ -350,7 +350,7 @@ on_app_input(struct proto *p, unsigned char msg,
 			info->keyvalue);
 		info_decref(info);
 		return ret;
-	case CMD_PUT:
+	case CMD_WRITE:
 		if (!contains_nul(data, datalen)) {
 			/* delete check if already deleted */
 			info = store_get(the_store, data);
