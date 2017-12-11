@@ -2,10 +2,11 @@
 *.po
 *.a
 *.so
+t-list
 t-match
-t-store
 t-proto
 t-server
+t-store
 infod/infod
 info/info
 .*.swp
