@@ -1,5 +1,5 @@
 
-infod3 protocol
+infod3 protocol v0
 
 	The infod3 protocol is a client-server protocol. The server
 	maintains a key/value store, and connected client may
@@ -35,7 +35,7 @@ infod3 protocol
 	The keys cannot contain NUL.
 
 	There are three wire encodings of the protocols defined:
-		- text stream
+		- text stream (CRLF terminated)
 		- binary stream (tag-length-value layout)
 		- framed binary (same as binary but without length)
 
@@ -176,36 +176,44 @@ Patterns
 	find key "iface.eth0.mtu" but miss "iface.bridge0.port1.mtu".
 	However, pattern "iface.*" will get both.
 
+	Overlong or invalid UTF-8 characters in either pattern or key text
+	MAY be treated as unmatchable. NULs may not appear in key or pattern.
+
 Binary form of messages
 
 	Binary messages are of the form
 
-		message-id (1 octet)
-		message-length (2 octets, network endian, payload len)
-		message-payload (* octets)
+		message-id       1 octet
+		message-length   2 octets, network endian, payload len
+		message-payload  len octets, no padding
 
 	Message IDs and their payloads
 
-		0x00 HELLO       <v><text>
+		0x00 HELLO       <v> <text>
 		0x01 SUB         <pattern>
 		0x02 UNSUB       <pattern>
 		0x03 READ        <key>
-		0x04 WRITE       <key>[0x00 <value>]
+		0x04 WRITE       <key> [0x00 <value>]
 		0x05 BEGIN
 		0x06 COMMIT
-		0x07 PING        <id>
+		0x07 PING        <value>
 
-		0x80 VERSION     <v><text>
-		0x81 INFO        <key>[0x00 <value>]
-		0x82 PONG        <id>
-		0x83 ERROR       <text>
+		0x80 VERSION     <v> <text>
+		0x81 INFO        <key> [0x00 <value>]
+		0x82 PONG        <value>
+		0x83 ERROR       <i> <text>
 
 	The <v> version is a single byte. It is 0x00 for this version.
-	The READ message must not contain a NUL (0x00) in its <key>.
-	The WRITE and INFO messages will not contain a NULL when the
-	message means a key deletion.
+
+	The READ message must not contain a NUL (0x00 byte) in its <key>.
+	The WRITE and INFO messages must not contain a NUL when the
+	message indicates a key deletion. This distinguishes key deletion
+	from an empty value.
+
 	Each of <key>, <pattern> and <text> are in UTF-8.
-	The <id> used for pings is arbitrary-length binary.
+	Each <value> is binary and need not be interpreted as UTF-8.
+	Keys sent by a client SHOULD be in normalized UTF-8, although the
+	server MUST NOT normalize or correct overlong encodings.
 
 	If a server sends an ERROR message in binary mode, it must
 	immediately close the connection.
@@ -252,16 +260,15 @@ Text form of messages
 	    VERSION <sp> <int> [<sp> <text>] <cr> <lf>
 	    INFO <sp> <key> [<sp> <value>] <cr> <lf>
 	    PONG <sp> [<ident>] <cr> <lf>
-	    ERROR <sp> <text> <cr> <lf>
+	    ERROR <sp> <int> <sp> <text> <cr> <lf>
 
-	<int> is a positive decimal integer smaller than 256. The server
-	will never generated superfluous leading 0s. The server will interpret
-	all received <int> as decimal. An empty <int> sent by
-	the clent must be interpreted as 0.
+	<int> is an unsigned decimal integer smaller than 256. The server
+	will never generated superfluous leading 0s.
 	
 	If the client omits the HELLO message, the server must not send
 	a VERSION response. However, the server may assume any version
-	that is compatible with version 0.
+	that is compatible with version 0.  A missing <int> in the HELLO
+	message means the same, except elicits a VERSION response.
 
     Human clients
 
