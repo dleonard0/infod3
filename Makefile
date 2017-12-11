@@ -69,8 +69,11 @@ bindir = $(prefix)/bin
 sbindir = $(prefix)/sbin
 libdir = $(prefix)/lib
 incdir = $(prefix)/include
+mandir = $(prefix)/man
 install:
 	$(INSTALL) -t $(DESTDIR)$(incdir) lib/info.h
 	$(INSTALL) -s -t $(DESTDIR)$(libdir) lib/libinfo3.so
 	$(INSTALL) -s -t $(DESTDIR)$(sbindir) infod/infod
 	$(INSTALL) -s -t $(DESTDIR)$(bindir) info/info
+	$(INSTALL) info/info.mdoc $(DESTDIR)$(mandir)/man1/info.1
+	$(INSTALL) infod/infod.mdoc $(DESTDIR)$(mandir)/man8/infod.8

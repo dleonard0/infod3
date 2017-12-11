@@ -1,0 +1,36 @@
+.Dd December 11, 2017
+.Os LOCAL
+.Dt infod 8
+.Sh NAME
+.Nm infod
+.Nd key-value server
+.Sh SYNOPSIS
+.Nm infod
+.Op Fl i
+.Op Fl s
+.Op Fl p Ar port
+.Op Fl v
+.Sh DESCRIPTION
+.Nm infod
+is a key-value storage server.
+.Pp
+The options are:
+.Bl -tag -offset indent
+.It Fl i
+Accept text protocol commands on standard input.
+.It Fl s
+Use
+.Xr syslog 3
+for messages, instead of standard error.
+.It Fl p Ar port
+Listen on TCP
+.Ar port
+for binary and text protocol connections.
+.It Fl v
+Increase verbosity.
+.El
+.Sh SEE ALSO
+.Xr info 1 ,
+.Xr info_open 3
+.Sh AUTHORS
+.An David Leonard

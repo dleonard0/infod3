@@ -1,0 +1,147 @@
+.Dd December 11, 2017
+.Os LOCAL
+.Dt info 1
+.Sh NAME
+.Nm info
+.Nd access and modify shared key-value data
+.Sh SYNOPSIS
+.Nm info
+.Op Fl b
+.Op Fl k Ns Oo Ar delim Oc
+.Op Fl S Ar host Ns Oo : Ns Ar port Oc
+.Op Fl t Ar secs
+.br
+.Oo
+.Oo Fl r Oc Ar key |
+.Fl w Ar key Ns = Ns Ar value |
+.Fl d Ar key |
+.Fl s Ar pattern
+.Oc Ns \&...
+.Sh DESCRIPTION
+.Nm info
+is the client tool for the
+.Xr infod 8
+information server.
+It fetches and prints keyed values to its output, one per line,
+and can store new values against keys in the server.
+.Pp
+The arguments to
+.Nm info
+are grouped into options and commands.
+The options are supplied first:
+.Bl -tag -offset indent
+.It Fl b
+Print blank values for deleted keys.
+The default is to suppress output for deleted keys.
+.It Fl k Ns Oo Ar delim Oc
+Prefix printed values with the key name and delimiter.
+The default is to print values alone, one per line.
+If
+.Ar delim
+is omitted, a single space character is printed between key and value.
+.It Fl S Ar host Ns Oo Ar \&: Ns Ar port Oc
+Connect to the
+.Xr infod 8
+server using a binary TCP protocol.
+The default is to use an abstract
+.Xr unix 7
+connection.
+.It Fl t Ar secs
+Specify the timeout in seconds for subscription
+.Fl s
+operations.
+The default timeout of \&-1 means no timeout.
+.El
+.Pp
+The commands come next and are processed in order.
+Each command flag correspond to a command message sent to the server.
+.Bl -tag -offset indent
+.It Oo Fl r Oc Ar key
+Reads and prints the returned value of a key.
+.It Fl w Ar key Ns = Ns Ar value
+Writes the value against the key.
+No output is generated.
+.It Fl d Ar key
+Delets the value against the key.
+No output is generated.
+.It Fl s Ar pattern
+Subscribes to a key pattern.
+.Nm
+will initially print all current keys matching the subscriptions.
+Then it will wait (up to the timeout),
+receiving and printing key values as they change.
+.Po See Sx PATTERNS . Pc
+.El
+.Ss CONNECTING
+The
+.Nm info
+tool will retry connections to the server for approximately 90 minutes.
+.Ss PATTERNS
+A key pattern is a UTF-8 string with some characters ("metchars")
+having special meaning:
+.Bd -literal -offset indent
+( | ) * ? \e
+.Ed
+.Pp
+The pattern is matched from left-to-right against each candidate key,
+succeding when the pattern matches an entire key.
+.Pp
+The elements of a pattern are:
+.Bl -tag -width "(x|y|...)" -offset indent
+.It Ar c
+A regular (non-metachar) character matches itself.
+.It \&?
+Matches any single character.
+.It Li * Ns Ar c
+Matches the shortest substring (including empty string)
+up to and then including the next regular character
+.Ar c .
+.It *
+A
+.Li *
+at the end of a pattern or followed by
+.Li |
+or
+.Li \&)
+greedily matches the rest of the key string.
+Patterns containing
+.Li **
+or
+.Li *(
+are invalid.
+The pattern
+.Li *?
+is equivalent to
+.Li \&? .
+.It Li \&( Ns Ar x Ns Li | Ns Ar y Ns Li | Ns ... Ns Li \&)
+A group matches the first matching branch of
+.Ar x y
+etc.
+Once a branch is matched, subsequent branches are
+ignored and matching continues after the closing
+.Li \&) .
+Parenthesised groups can be nested up to four deep.
+.It \e Ns Ar c
+Matches exactly the character
+.Ar c
+which may be a metachar.
+.El
+.Pp
+The greedy nature of * means that the pattern
+.Ql iface.*.mtu
+will match the key
+.Ql iface.eth0.mtu
+but not
+.Ql iface.bridge0.port1.mtu .
+However, the pattern
+.Ql iface.*
+will match both.
+.Ss EXIT STATUS
+.Nm
+will exit 0 only when all operations were successful,
+and no deleted keys were received.
+.Sh SEE ALSO
+.Xr infod 8 ,
+.Xr info_open 3
+.Sh AUTHORS
+.An David Leonard
