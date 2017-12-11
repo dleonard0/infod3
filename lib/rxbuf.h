@@ -15,5 +15,6 @@ int  rxbuf_add(struct rxbuf *rx, const void *p, size_t n);
 /* Clears the buffer, and ensures it has space for sz chars */
 int  rxbuf_clear(struct rxbuf *rx, size_t sz);
 void rxbuf_trimspace(struct rxbuf *rx);
+/* Ensure a NUL follows the active buffer region */
 int  rxbuf_zeropad(struct rxbuf *rx);
 
