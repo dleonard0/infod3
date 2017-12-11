@@ -18,6 +18,9 @@ t-proto: lib/t-proto.o lib/proto.o lib/protofram.o lib/prototext.o \
 TESTS += t-server
 t-server: infod/t-server.o infod/server.o
 	$(LINK.c) $(OUTPUT_OPTION) $^
+TESTS += t-list
+t-list: infod/t-list.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
 check: $(TESTS:%=%.checked)
 %.checked: %
 	$(RUNTEST) $(<D)/$(<F)
@@ -66,8 +69,8 @@ bindir = $(prefix)/bin
 sbindir = $(prefix)/sbin
 libdir = $(prefix)/lib
 incdir = $(prefix)/include
-install: 
-	$(INSTALL) -t $(DESTDIR)$(incdir) lib/info.h 
-	$(INSTALL) -t $(DESTDIR)$(libdir) lib/libinfo3.so 
-	$(INSTALL) -t $(DESTDIR)$(sbindir) infod/infod
-	$(INSTALL) -t $(DESTDIR)$(bindir) info/info
+install:
+	$(INSTALL) -t $(DESTDIR)$(incdir) lib/info.h
+	$(INSTALL) -s -t $(DESTDIR)$(libdir) lib/libinfo3.so
+	$(INSTALL) -s -t $(DESTDIR)$(sbindir) infod/infod
+	$(INSTALL) -s -t $(DESTDIR)$(bindir) info/info

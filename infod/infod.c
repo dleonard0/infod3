@@ -162,7 +162,6 @@ client_free(struct client *client)
 		REMOVE(bcmd);
 		bufcmd_free(bcmd);
 	}
-
 	free(client);
 }
 
@@ -304,7 +303,7 @@ buffer_command(struct client *client, unsigned char msg,
 	if (!bcmd)
 		return proto_output_error(p, PROTO_ERROR_INTERNAL,
 			"begin: %s", strerror(errno));
-	APPEND(bcmd, client->bufcmd_tail);
+	APPEND(bcmd, &client->bufcmd_tail);
 	return 1;
 }
 
@@ -339,7 +338,7 @@ on_app_input(struct proto *p, unsigned char msg,
 		if (!sub)
 			return proto_output_error(p, PROTO_ERROR_INTERNAL,
 				"sub: %s", strerror(errno));
-		INSERT(sub, client->subs);
+		INSERT(sub, &client->subs);
 		client->nsubs++;
 		index = index_open(the_store);
 		if (!index)
@@ -444,7 +443,7 @@ on_net_accept(struct server *s, int fd, struct listener *l)
 		return NULL;
 	}
 
-	INSERT(client, all_clients);
+	INSERT(client, &all_clients);
 	if (l == &unix_listener)
 		proto_set_mode(client->proto, PROTO_MODE_FRAMED);
 
