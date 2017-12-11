@@ -71,6 +71,9 @@ struct client {
 		char data[];
 	} *bufcmds, **bufcmd_tail;
 
+#ifndef SMALL
+	struct listener *listener; /* only for verbose */
+#endif
 } *all_clients;
 
 static int on_app_input(struct proto *p, unsigned char msg,
@@ -307,9 +310,46 @@ buffer_command(struct client *client, unsigned char msg,
 	return 1;
 }
 
+#ifndef SMALL
+static void
+log_input_verbose(struct client *client, unsigned char msg,
+	const char *data, unsigned int datalen)
+{
+	char namebuf[PEERNAMESZ];
+	char p[PEERNAMESZ+2];
+
+	snprintf(p, sizeof p, "[%s] got%c", listener_peername(client->listener,
+		client->fd, namebuf, sizeof namebuf),
+		client->begins ? '+' : ' ');
+
+	switch (msg) {
+#define L(...) log_msgf(LOG_DEBUG, __VA_ARGS__)
+	case CMD_HELLO:
+	  switch (datalen) {
+	  case 0: L("%s HELLO", p); break;
+	  default: L("%s HELLO %u %.*s", p, data[0] & 0xff, datalen-1, data+1);
+	  } break;
+	case CMD_SUB: L("%s SUB %.*s", p, datalen, data); break;
+	case CMD_UNSUB: L("%s UNSUB %.*s", p, datalen, data); break;
+	case CMD_READ: L("%s READ %.*s", p, datalen, data); break;
+	case CMD_WRITE: {
+	  unsigned int kl = strlen(data);
+	  if (kl == datalen) L("%s WRITE %.*s (delete)", p, datalen, data);
+	  else L("%s WRITE %s %.*s", p, data, datalen-kl-1, data+kl+1);
+	  } break;
+	case CMD_BEGIN: L("%s BEGIN %.*s", p, datalen, data); break;
+	case CMD_COMMIT: L("%s COMMIT %.*s", p, datalen, data); break;
+	case CMD_PING: L("%s PING %.*s", p, datalen, data); break;
+	case MSG_EOF: L("%s <EOF>", p); break;
+	default: L("%s <msg=%02x,len=%u> %.*s", p, msg, datalen, datalen,data);
+#undef L
+	}
+}
+#endif
+
 static int
 on_app_input(struct proto *p, unsigned char msg,
-	 const char *data, unsigned int datalen)
+	const char *data, unsigned int datalen)
 {
 	struct client *client = proto_get_udata(p);
 	struct client *c;
@@ -317,6 +357,11 @@ on_app_input(struct proto *p, unsigned char msg,
 	struct info *info;
 	struct index *index;
 	int ret;
+
+#ifndef SMALL
+	if (VERBOSE > 1)
+		log_input_verbose(client, msg, data, datalen);
+#endif
 
 	if (msg == MSG_EOF)
 		return 0;
@@ -444,6 +489,9 @@ on_net_accept(struct server *s, int fd, struct listener *l)
 	}
 
 	INSERT(client, &all_clients);
+#ifndef SMALL
+	client->listener = l;
+#endif
 	if (l == &unix_listener)
 		proto_set_mode(client->proto, PROTO_MODE_FRAMED);
 
