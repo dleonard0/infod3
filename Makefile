@@ -5,13 +5,13 @@ CPPFLAGS += -I.
 
 default: check infod/infod info/info
 
-TESTS += t-proto
+TESTS += t-store
 t-store: infod/t-store.o infod/store.o
 	$(LINK.c) $(OUTPUT_OPTION) $^
-TESTS += t-store
+TESTS += t-match
 t-match: infod/t-match.o infod/match.o
 	$(LINK.c) $(OUTPUT_OPTION) $^
-TESTS += t-match
+TESTS += t-proto
 t-proto: lib/t-proto.o lib/proto.o lib/protofram.o lib/prototext.o \
 	 lib/protobin.o lib/rxbuf.o
 	$(LINK.c) $(OUTPUT_OPTION) $^
