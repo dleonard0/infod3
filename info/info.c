@@ -33,6 +33,7 @@ static struct {
 
 /* Number of times a deleted value was received */
 static unsigned int deleted_count;
+static int print_cb_flush;
 
 static int
 print_cb(const char *key, const char *value, unsigned int sz)
@@ -47,6 +48,8 @@ print_cb(const char *key, const char *value, unsigned int sz)
 	if (sz)
 		fwrite(value, sz, 1, stdout);
 	putchar('\n');
+	if (print_cb_flush)
+		fflush(stdout);
 	return 1;
 }
 
@@ -193,6 +196,10 @@ main(int argc, char *argv[])
 		goto fail;
 
 	if (have_subs && options.timeout != 0) {
+		/* Flush stdio buffers for each update */
+		print_cb_flush = 1;
+		fflush(stdout);
+
 		if (options.timeout > 0) {
 			if (signal(SIGALRM, on_alarm) == SIG_ERR) {
 				perror("signal");
