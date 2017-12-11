@@ -19,7 +19,7 @@ static char last_error[1024];
 static struct proto *proto;
 static int tx_begun;
 
-unsigned int info_retries;
+unsigned int info_retries = 100;
 
 static struct {
 	unsigned char until_msg;	/* on arrival, increments done */
