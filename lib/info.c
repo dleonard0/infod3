@@ -19,6 +19,8 @@ static char last_error[1024];
 static struct proto *proto;
 static int tx_begun;
 
+unsigned int info_retries;
+
 static struct {
 	unsigned char until_msg;	/* on arrival, increments done */
 	int done;
@@ -421,48 +423,61 @@ info_on_sendv(struct proto *p, const struct iovec *iovs, int niovs)
 	return writev(fd, iovs, niovs);
 }
 
+/* Return -1 on error, 0 on success */
+static int
+try_connect(const char *hostport, int *mode)
+{
+	if (hostport) {
+		fd = open_tcp(hostport);
+		if (fd == -1)
+			return -1;
+		*mode = PROTO_MODE_BINARY;
+		return 0;
+	} else {
+		fd = sockunix_connect();
+		if (fd == -1) {
+			snprintf(last_error, sizeof last_error,
+				"sockunix_connect: %s",
+				strerror(errno));
+			return -1;
+		}
+		*mode = PROTO_MODE_FRAMED;
+		return 0;
+	}
+}
+
 int
 info_open(const char *hostport)
 {
-	int framed;
+	unsigned int retry;
+	int mode = PROTO_MODE_UNKNOWN;
 
 	if (fd != -1 && proto)
 		return 0;
-	if (fd == -1) {
-		if (hostport) {
-			fd = open_tcp(hostport);
-			if (fd == -1)
-				return -1;
-			framed = 0;
-		} else {
-			fd = sockunix_connect();
-			if (fd == -1) {
-				snprintf(last_error, sizeof last_error,
-					"sockunix_connect: %s",
-					strerror(errno));
-				return -1;
-			}
-			framed = 1;
-		}
+
+	info_close();
+	for (retry = 0; retry < info_retries; retry++) {
+		if (try_connect(hostport, &mode) == 0)
+			break;
+		sleep(retry);
 	}
+	if (fd == -1)
+		return -1; /* too many retries */
+
+	proto = proto_new();
 	if (!proto) {
-		proto = proto_new();
-		if (!proto)
-			return -1;
+		info_close();
+		return -1;
 	}
-	if (proto_set_mode(proto,
-	    framed ? PROTO_MODE_FRAMED : PROTO_MODE_BINARY) == -1)
-		goto fail;
+
 	waitret_init();
 	tx_begun = 1;
+
+	proto_set_mode(proto, mode);
 	proto_set_on_input(proto, wait_on_input);
 	proto_set_on_sendv(proto, info_on_sendv);
 	/* send HELLO? */
 	return 0;
-
-fail:
-	info_close();
-	return -1;
 }
 
 void

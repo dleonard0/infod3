@@ -17,6 +17,7 @@ int info_writev(const struct info_bind *binds);
 /* Optional; this function will be automatically called
  * if the connection is not already open */
 int info_open(const char *server);
+extern unsigned int info_retries;
 /* Closes the socket opened by info_read() etc */
 void info_close(void);
 int info_fileno(void);
