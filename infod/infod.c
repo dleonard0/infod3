@@ -410,7 +410,7 @@ on_app_input(struct proto *p, unsigned char msg,
 				"read: invalid key");
 		info = store_get(the_store, data);
 		if (!info)
-			return proto_output(p, MSG_INFO, "%s%c", data, 0);
+			return proto_output(p, MSG_INFO, "%s", data);
 		ret = proto_output(p, MSG_INFO, "%*s", info->sz,
 			info->keyvalue);
 		info_decref(info);
