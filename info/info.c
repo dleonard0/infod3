@@ -25,11 +25,16 @@ static struct {
 #endif
 } options;
 
+/* Number of times a deleted value was received */
+static unsigned int deleted_count;
+
 static int
 print_cb(const char *key, const char *value, unsigned int sz)
 {
 	if (options.key_delim)
 		printf("%s%s", key, value ? options.key_delim : "");
+	if (!value)
+		deleted_count++;
 	if (value && sz)
 		fwrite(value, sz, 1, stdout);
 	if (value || options.key_delim)
@@ -149,8 +154,9 @@ main(int argc, char *argv[])
 	if (have_subs) {
 		if (info_sub_wait(print_cb) == -1)
 			goto fail;
+		exit(1);
 	}
-	exit(0);
+	exit(deleted_count);
 
 fail:
 	fprintf(stderr, "%s\n", info_get_last_error());
