@@ -8,12 +8,14 @@
 
 static const char usage_options[] =
 #ifdef SMALL
-	"[-k[delim]] {[-r] key | -w key=value | -d key | -s pattern}...\n"
+	"[-b] [-k[delim]] [-t secs] "
+	"{[-r] key | -w key=value | -d key | -s pattern}...\n"
 #else
 	"[opts] {[-r] key | -w key=value | -d key | -s pattern}...\n"
 	"  -r/-w/-d  read/write/delete a key\n"
 	"  -s        subscribe to pattern (forever)\n"
 	"options:\n"
+	"  -b        output a blank line for deleted keys\n"
 	"  -k[delim] print key name when reading/subscribing\n"
 	"  -S h:p    connect to TCP host:port\n"
 	"  -t secs   timeout a subscription\n"
@@ -23,6 +25,7 @@ static const char usage_options[] =
 static struct {
 	const char *key_delim;	/* -k[delim] */
 	int timeout;
+	int blank;
 #ifndef SMALL
 	const char *socket;	/* -S */
 #endif
@@ -34,14 +37,16 @@ static unsigned int deleted_count;
 static int
 print_cb(const char *key, const char *value, unsigned int sz)
 {
-	if (options.key_delim)
-		printf("%s%s", key, value ? options.key_delim : "");
-	if (!value)
+	if (!value) {
 		deleted_count++;
-	if (value && sz)
+		if (!options.blank)
+			return 1;
+	}
+	if (options.key_delim)
+		printf("%s%s", key, options.key_delim);
+	if (sz)
 		fwrite(value, sz, 1, stdout);
-	if (value || options.key_delim)
-		putchar('\n');
+	putchar('\n');
 	return 1;
 }
 
@@ -85,6 +90,11 @@ main(int argc, char *argv[])
 			continue;
 		}
 #endif
+		if (strcmp(opt, "-b") == 0) {
+			options.blank = 1;
+			optind++;
+			continue;
+		}
 		if (strncmp(opt, "-t", 2) == 0) {
 			if (opt[2])
 				arg = &opt[2];
