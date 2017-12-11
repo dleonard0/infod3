@@ -57,15 +57,16 @@ main(int argc, char *argv[])
 
 	/* Gather connection options */
 	while (optind < argc) {
-		const char *arg = argv[optind];
-		if (strncmp(arg, "-k", 2) == 0) {
-			options.key_delim = arg[2] ? &arg[2] : " ";
+		const char *opt = argv[optind];
+		const char *arg = argv[optind + 1];
+		if (strncmp(opt, "-k", 2) == 0) {
+			options.key_delim = opt[2] ? &opt[2] : " ";
 			optind++;
 			continue;
 		}
 #ifndef SMALL
-		if (strcmp(arg, "-S") == 0) {
-			options.socket = argv[optind + 1];
+		if (strcmp(opt, "-S") == 0) {
+			options.socket = arg;
 			if (!options.socket) {
 				error = 2;
 				break;
@@ -79,20 +80,22 @@ main(int argc, char *argv[])
 
 	/* Check command options */
 	for (i = optind; !error && i < argc; i++) {
-		const char *arg = argv[i];
-		if (*arg != '-')
+		const char *opt = argv[i];
+		const char *arg;
+		if (*opt != '-')
 			continue; /* assume -r */
-		if (arg[2] || !strchr("rwds", arg[1])) {
-			fprintf(stderr, "bad option %s\n", arg);
+		if (opt[2] || !strchr("rwds", opt[1])) {
+			fprintf(stderr, "bad option %s\n", opt);
 			error = 2;
 			break;
 		}
-		if (!argv[i + 1]) {
-			fprintf(stderr, "missing arg after %s\n", arg);
+		arg = argv[i + 1];
+		if (!arg) {
+			fprintf(stderr, "missing arg after %s\n", opt);
 			error = 2;
 			break;
 		}
-		if (arg[1] == 'w' && !strchr(argv[i+1], '=')) {
+		if (opt[1] == 'w' && !strchr(arg, '=')) {
 			fprintf(stderr, "missing '=' after -w\n");
 			error = 2;
 			break;
@@ -117,17 +120,17 @@ main(int argc, char *argv[])
 	if (info_tx_begin() == -1)
 		goto fail;
 	for (i = optind; !error && i < argc; i++) {
-		char *arg = argv[i];
+		char *opt = argv[i];
 		char *data = NULL;
 		char *value;
 
-		if (*arg != '-') {
-			data = arg;
-			arg = "-r";
+		if (*opt != '-') {
+			data = opt;
+			opt = "-r";
 		} else
 			data = argv[++i];
 
-		switch (arg[1]) {
+		switch (opt[1]) {
 		case 'r':
 			if (info_tx_read(data) == -1)
 				goto fail;
