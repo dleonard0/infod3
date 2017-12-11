@@ -135,8 +135,11 @@ wait_until(unsigned char msg)
 				"connection closed by server");
 			return 0;
 		}
-		if (len == -1)
-			return len;
+		if (len == -1) {
+			snprintf(last_error, sizeof last_error,
+				"read: %s", strerror(errno));
+			return -1;
+		}
 		buf[len] = '\0';
 		len = proto_recv(proto, buf, len);
 		if (len <= 0)
@@ -474,6 +477,13 @@ info_close()
 		fd = -1;
 	}
 	tx_begun = 0;
+}
+
+void
+info_shutdown()
+{
+	if (fd != -1)
+		shutdown(fd, SHUT_RD);
 }
 
 int

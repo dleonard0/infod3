@@ -20,6 +20,8 @@ int info_open(const char *server);
 /* Closes the socket opened by info_read() etc */
 void info_close(void);
 int info_fileno(void);
+/* Half-closes the connections. Used by timeouts to cancel an operation. */
+void info_shutdown(void);
 
 /* Transactional */
 int info_tx_begin();
