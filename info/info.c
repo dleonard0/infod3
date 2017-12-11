@@ -7,19 +7,19 @@
 
 static const char usage_options[] =
 #ifdef SMALL
-	"[-k] {[-r] key | -w key=value | -d key | -s pattern}...\n"
+	"[-k[delim]] {[-r] key | -w key=value | -d key | -s pattern}...\n"
 #else
 	"[opts] {[-r] key | -w key=value | -d key | -s pattern}...\n"
 	"  -r/-w/-d  read/write/delete a key\n"
 	"  -s        subscribe to pattern (forever)\n"
 	"options:\n"
-	"  -k        print key name when reading/subscribing\n"
+	"  -k[delim] print key name when reading/subscribing\n"
 	"  -S h:p    connect to TCP host:port\n"
 #endif
 	;
 
 static struct {
-	char print_key;		/* -k */
+	const char *key_delim;	/* -k[delim] */
 #ifndef SMALL
 	const char *socket;	/* -S */
 #endif
@@ -28,11 +28,11 @@ static struct {
 static int
 print_cb(const char *key, const char *value, unsigned int sz)
 {
-	if (options.print_key)
-		printf("%s%s", key, value ? " " : "");
+	if (options.key_delim)
+		printf("%s%s", key, value ? options.key_delim : "");
 	if (value && sz)
 		fwrite(value, sz, 1, stdout);
-	if (value || options.print_key)
+	if (value || options.key_delim)
 		putchar('\n');
 	return 1;
 }
@@ -53,8 +53,8 @@ main(int argc, char *argv[])
 	/* Gather connection options */
 	while (optind < argc) {
 		const char *arg = argv[optind];
-		if (strcmp(arg, "-k") == 0) {
-			options.print_key = 1;
+		if (strncmp(arg, "-k", 2) == 0) {
+			options.key_delim = arg[2] ? &arg[2] : " ";
 			optind++;
 			continue;
 		}
