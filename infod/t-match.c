@@ -56,6 +56,12 @@ main()
 	PASS("ab*?", "abc");
 	FAIL("ab*?", "ab");
 
+	/* UTF-8 characters and ? */
+	PASS("€", "€");
+	PASS("x?y", "x€y");
+	FAIL("x?y", "xせんy");
+	PASS("x??y", "xせんy");
+
 	/* Parentheses match */
 	PASS("()", "");		FAIL("()", "x");
 	PASS("(a)", "a");	FAIL("(a)", "x");	FAIL("(a)", "");

@@ -93,9 +93,14 @@ do_match(const char *pattern, const char *string)
 				any = 1;
 			if (string == CHECK)
 				; /* only doing validity check */
-			else if (any ? *string : *string == p)
-				string++;
-			else if (paren)
+			else if (any ? *string : *string == p) {
+				if (any && (*string & 0xc0) == 0xc0) {
+					string++; /* skip a UTF-8 char */
+					while ((*string & 0xc0) == 0x80)
+						string++;
+				} else
+					string++;
+			} else if (paren)
 				paren->failed = 1;
 			else
 				return 0;	/* char mismatch */
