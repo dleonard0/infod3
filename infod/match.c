@@ -5,6 +5,32 @@
 
 char CHECK[] = "";
 
+/* Compare the UTF-8 characters at two pointers for equality. */
+static int
+utf8eq(const char *a, const char *b)
+{
+	if (*a != *b)
+		return 0;
+	if ((*a & 0xc0) != 0xc0)
+		return 1;
+	a++; b++;
+	while ((*a & 0xc0) == 0x80) {
+		if (*a != *b)
+			return 0;
+		a++; b++;
+	}
+	return 1;
+}
+
+/* Advance pointer over a UTF-8 character */
+static void
+utf8inc(const char **ap)
+{
+	if ((*(*ap)++ & 0xc0) == 0xc0)
+		while ((**ap & 0xc0) == 0x80)
+			++*ap;
+}
+
 /*
  * Match pattern against string.
  * If string is the special pointer CHECK, then the
@@ -40,8 +66,8 @@ do_match(const char *pattern, const char *string)
 						return -1; /* \ at end */
 				}
 				if (string != CHECK)
-				    while (*string && *string != n)
-					string++;	/* greedy forward */
+				    while (*string && !utf8eq(string, pattern))
+					utf8inc(&string); /* greedy forward */
 			}
 		} else if (p == '(') {
 			/* open new paren */
@@ -94,11 +120,9 @@ do_match(const char *pattern, const char *string)
 			if (string == CHECK)
 				; /* only doing validity check */
 			else if (any ? *string : *string == p) {
-				if (any && (*string & 0xc0) == 0xc0) {
-					string++; /* skip a UTF-8 char */
-					while ((*string & 0xc0) == 0x80)
-						string++;
-				} else
+				if (any)
+					utf8inc(&string);
+				else
 					string++;
 			} else if (paren)
 				paren->failed = 1;

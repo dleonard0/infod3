@@ -61,6 +61,8 @@ main()
 	PASS("x?y", "x€y");
 	FAIL("x?y", "xせんy");
 	PASS("x??y", "xせんy");
+	PASS("x*y", "xせんy");
+	PASS("x*€", "xせ₫€");
 
 	/* Parentheses match */
 	PASS("()", "");		FAIL("()", "x");
