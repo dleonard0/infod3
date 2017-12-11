@@ -637,11 +637,11 @@ main(int argc, char *argv[])
 	if (error) {
 		if (error == 2) {
 			fprintf(stderr, "usage: %s "
-#ifndef SMALL
+#ifdef SMALL
 						"[-s]"
-#else /* SMALL */
+#else /* !SMALL */
 						"[-siv] [-p port]"
-#endif /* SMALL */
+#endif /* !SMALL */
 				"\n",
 				argv[0]);
 		}
