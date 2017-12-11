@@ -396,6 +396,7 @@ open_tcp(const char *hostport)
 		if (connect(s, ai->ai_addr, ai->ai_addrlen) == -1) {
 			reason = "connect";
 			close(s);
+			s = -1;
 			continue;
 		}
 	}
