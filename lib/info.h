@@ -14,8 +14,9 @@ struct info_bind {
 int info_readv(struct info_bind *binds, char *buffer, unsigned int sz);
 int info_writev(const struct info_bind *binds);
 
-/* Optional; this function will be automatically called
- * if the connection is not already open */
+/* Opens socket to server. This function is called automatically
+ * by other functions as needed. It will also retry failed connections
+ * with a backoff delay. */
 int info_open(const char *server);
 extern unsigned int info_retries;
 /* Closes the socket opened by info_read() etc */
@@ -30,14 +31,17 @@ int info_tx_read(const char *key);
 int info_tx_write(const char *key, const char *value, unsigned int valuesz);
 int info_tx_delete(const char *key);
 int info_tx_sub(const char *pattern);
-/* Commit the transaction. The callback will be called for all reads, and
- * the immediate subscription patterns */
-int info_tx_commit(int (*cb)(const char *key, const char *value, unsigned int sz));
+/* Commit the transaction. The optional callback will receive all tx_read
+ * and tx_sub initial results. The callback should return 1 to continue,
+ * or 0 to terminate. */
+int info_tx_commit(int (*cb)(const char *key,
+	const char *value, unsigned int sz));
 
 /* Wait for more updates from a subscription. If the cb returns 0 the wait
- * will return 0 */
-int info_sub_wait(int (*cb)(const char *key, const char *value, unsigned int sz));
+ * loop will terminate and return 0 */
+int info_sub_wait(int (*cb)(const char *key,
+	const char *value, unsigned int sz));
 
-/* Returns the last error message received */
+/* Returns the last error message received from the server. */
 const char *info_get_last_error(void);
 
