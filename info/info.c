@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 
 #include "../lib/info.h"
 
@@ -15,11 +16,13 @@ static const char usage_options[] =
 	"options:\n"
 	"  -k[delim] print key name when reading/subscribing\n"
 	"  -S h:p    connect to TCP host:port\n"
+	"  -t secs   timeout a subscription\n"
 #endif
 	;
 
 static struct {
 	const char *key_delim;	/* -k[delim] */
+	int timeout;
 #ifndef SMALL
 	const char *socket;	/* -S */
 #endif
@@ -42,6 +45,11 @@ print_cb(const char *key, const char *value, unsigned int sz)
 	return 1;
 }
 
+static void
+on_alarm(int sig)
+{
+	info_shutdown();
+}
 
 int
 main(int argc, char *argv[])
@@ -50,6 +58,8 @@ main(int argc, char *argv[])
 	int optind = 1;
 	int i;
 	int have_subs = 0;
+
+	options.timeout = -1;
 
 	/* getopt has a habit of scanning all options on the line
 	 * and I want to process them one at a time, so the following
@@ -75,6 +85,19 @@ main(int argc, char *argv[])
 			continue;
 		}
 #endif
+		if (strncmp(opt, "-t", 2) == 0) {
+			if (opt[2])
+				arg = &opt[2];
+			else
+				arg = argv[++optind];
+			if (!arg || sscanf(arg, "%d", &options.timeout) != 1) {
+				fprintf(stderr, "invalid timeout\n");
+				error = 2;
+				break;
+			}
+			optind++;
+			continue;
+		}
 		break;
 	}
 
@@ -152,12 +175,23 @@ main(int argc, char *argv[])
 			break;
 		}
 	}
+	if (options.timeout >= 0 && !have_subs)
+		fprintf(stderr, "%s: timeout only applies to subscriptions\n",
+			argv[0]);
+
 	if (info_tx_commit(print_cb) == -1)
 		goto fail;
-	if (have_subs) {
+
+	if (have_subs && options.timeout != 0) {
+		if (options.timeout > 0) {
+			if (signal(SIGALRM, on_alarm) == SIG_ERR) {
+				perror("signal");
+				exit(1);
+			}
+			alarm(options.timeout);
+		}
 		if (info_sub_wait(print_cb) == -1)
 			goto fail;
-		exit(1);
 	}
 	exit(deleted_count);
 
