@@ -194,7 +194,6 @@ client_new(int fd)
 	 * the client owns the proto, not vice versa. */
 	proto_set_udata(proto, client, NULL);
 
-	INSERT(client, all_clients);
 	return client;
 }
 
@@ -220,6 +219,7 @@ on_net_close(struct server *s, void *c, struct listener *l)
 			listener_peername(l, client->fd,
 				namebuf, sizeof namebuf));
 	}
+	REMOVE(client);
 	client_free(client);
 }
 
@@ -444,6 +444,7 @@ on_net_accept(struct server *s, int fd, struct listener *l)
 		return NULL;
 	}
 
+	INSERT(client, all_clients);
 	if (l == &unix_listener)
 		proto_set_mode(client->proto, PROTO_MODE_FRAMED);
 
