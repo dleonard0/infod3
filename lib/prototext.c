@@ -40,7 +40,7 @@ static struct {
 	{ "ERROR",	MSG_ERROR, "it" },
 	{ "HELP",	PSEUDO_HELP, "" },
 	{ "H",		PSEUDO_HELP, "" },
-	{}
+	{ NULL }
 };
 
 static const char help_text[] =
