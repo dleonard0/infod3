@@ -141,7 +141,7 @@ mock_on_input_fn(struct proto *p, unsigned char msg,
 
 #if DEBUG
 	dprintf("mock_on_input_fn(p=%p, msg=%s, datalen=%u) -> %d %s #%u\n",
-		p, msg_str(msg), datalen, mock_on_input.retval,
+		(void *)p, msg_str(msg), datalen, mock_on_input.retval,
 		mock_on_input.retval == -1
 			? strerror(mock_on_input.reterrno)
 			: "",
@@ -184,7 +184,7 @@ assert_mock_on_input(int line, const char *call, struct proto *p,
 		fprintf(stderr, "%s:%d: %s " FAILED ":\n\t"
 			"expected proto %p, actual %p\n",
 			__FILE__, line, call,
-			p, mock_on_input.p);
+			(void *)p, (void *)mock_on_input.p);
 		abort();
 	}
 	if (mock_on_input.msg != msg) {
@@ -274,7 +274,7 @@ assert_mock_on_sendv(int line, const char *call, struct proto *p,
 		fprintf(stderr, "%s:%d: %s " FAILED ":\n\t"
 			"expected proto %p, actual %p\n",
 			__FILE__, line, call,
-			p, mock_on_sendv.p);
+			(void *)p, (void *)mock_on_sendv.p);
 		abort();
 	}
 	if (mock_on_sendv.datalen != slen ||
@@ -348,7 +348,7 @@ assert_mock_udata_free(int line, const char *call, void *udata)
 static void
 mock_on_error_fn(struct proto *p, const char *msg)
 {
-	dprintf("on_error: p=%p msg=<%s>\n", p, msg);
+	dprintf("on_error: p=%p msg=<%s>\n", (void *)p, msg);
 	mock_on_error.counter++;
 	mock_on_error.p = p;
 	snprintf(mock_on_error.msg, sizeof mock_on_error.msg, "%s", msg);
@@ -375,7 +375,8 @@ assert_mock_on_error_called(int line, const char *call, struct proto *p)
 	if (mock_on_error.p != p) {
 		fprintf(stderr, "%s:%d: %s " FAILED ": "
 			"on_error was called with p=%p, expected %p\n",
-			__FILE__, line, call, mock_on_error.p, p);
+			__FILE__, line, call,
+			(void *)mock_on_error.p, (void *)p);
 		abort();
 	}
 	if (!mock_on_error.msg[0]) {

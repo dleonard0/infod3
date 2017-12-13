@@ -39,8 +39,8 @@ assert_same(const char *file, int line, const char *expr,
 					"\tactual:   %p [%d]\n",
 				    file, line, expr,
 				    pos,
-				    exp, exp ? exp->i : -1,
-				    act, act ? act->i : -1);
+				    (void *)exp, exp ? exp->i : -1,
+				    (void *)act, act ? act->i : -1);
 			abort();
 		}
 		if (!exp)
