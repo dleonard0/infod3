@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <syslog.h>
 #include <netdb.h>
+#include <signal.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -578,6 +579,13 @@ add_tcp_listeners(struct server *server)
 }
 #endif /* !SMALL */
 
+static int terminated;
+static void
+on_sigterm(int sig)
+{
+	terminated = 1;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -641,6 +649,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	memset(&server_context, 0, sizeof server_context);
 	server_context.max_sockets = 64;
 	server_context.on_accept = on_net_accept;
 	server_context.on_ready = on_net_ready;
@@ -660,12 +669,29 @@ main(int argc, char *argv[])
 #endif /* !SMALL */
 	add_unix_listener(server);
 
-	while ((ret = server_poll(server, -1)) > 0)
-		if (ret == -1)
-			log_perror("poll");
+	/* handle clean termination signals */
+	if (signal(SIGTERM, on_sigterm) == SIG_ERR) {
+		log_perror("signal SIGTERM");
+		exit(1);
+	}
+	if (signal(SIGINT, on_sigterm) == SIG_ERR) {
+		log_perror("signal SIGINT");
+		exit(1);
+	}
+
+	while ((ret = server_poll(server, -1)) > 0) {
+		if (ret == -1) {
+			if (!(errno == EINTR && terminated))
+				log_perror("poll");
+		}
+		if (terminated)
+			break;
+	}
 	if (ret == 0 && VERBOSE)
 		on_net_error(server, "no listeners!");
 
+	log_msg(LOG_ERR, "terminating");
 	server_free(server);
 	store_close(the_store);
+	exit(terminated);
 }
