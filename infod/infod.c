@@ -354,9 +354,8 @@ on_app_input(struct proto *p, unsigned char msg,
 	struct client *client = proto_get_udata(p);
 	struct client *c;
 	struct subscription *sub;
-	struct info *info;
-	struct index *index;
-	int ret;
+	const struct info *info;
+	struct store_index ix;
 
 #ifndef SMALL
 	if (VERBOSE > 1)
@@ -385,16 +384,15 @@ on_app_input(struct proto *p, unsigned char msg,
 				"sub: %s", strerror(errno));
 		INSERT(sub, &client->subs);
 		client->nsubs++;
-		index = index_open(the_store);
-		if (!index)
-			return proto_output_error(p, PROTO_ERROR_INTERNAL,
-				"sub: %s", strerror(errno));
-		while ((info = index_next(index)))
+		for (info = store_get_first(the_store, &ix);
+		     info;
+		     info = store_get_next(the_store, &ix))
+		{
 			if (match(data, info->keyvalue))
 				if (proto_output(p, MSG_INFO, "%*s",
 				    info->sz, info->keyvalue) == -1)
 					return -1;
-		index_close(index);
+		}
 		return 1;
 	case CMD_UNSUB:
 		sub = client_find_subscription(client, data, datalen);
@@ -409,35 +407,21 @@ on_app_input(struct proto *p, unsigned char msg,
 			return proto_output_error(p, PROTO_ERROR_BAD_ARG,
 				"read: invalid key");
 		info = store_get(the_store, data);
-		if (!info)
-			return proto_output(p, MSG_INFO, "%s", data);
-		ret = proto_output(p, MSG_INFO, "%*s", info->sz,
-			info->keyvalue);
-		info_decref(info);
-		return ret;
+		return info ? proto_output(p, MSG_INFO, "%*s", info->sz,
+				    info->keyvalue)
+			    : proto_output(p, MSG_INFO, "%s", data);
 	case CMD_WRITE:
 		if (!contains_nul(data, datalen)) {
-			/* delete check if already deleted */
-			info = store_get(the_store, data);
-			if (!info)
-				return 1;
-			store_del(the_store, info);
-			info_decref(info);
+			if (!store_del(the_store, data))
+				return 1; /* del had no effect */
 		} else {
 			/* check if same value already */
 			info = store_get(the_store, data);
-			info_decref(info);
 			if (info &&
 			    info->sz == datalen &&
 			    memcmp(data, info->keyvalue, datalen) == 0)
 				return 1; /* no change */
-			info = info_new(datalen);
-			if (!info)
-				return proto_output_error(p,
-					PROTO_ERROR_INTERNAL, "write: %s",
-					strerror(errno));
-			memcpy(info->keyvalue, data, datalen);
-			if (store_put(the_store, info) == -1)
+			if (store_put(the_store, datalen, data) == -1)
 				return proto_output_error(p,
 					PROTO_ERROR_INTERNAL, "write: %s",
 					strerror(errno));
@@ -651,9 +635,9 @@ main(int argc, char *argv[])
 	if (options.syslog)
 		openlog(basename(argv[0]), LOG_CONS | LOG_PERROR, LOG_DAEMON);
 
-	the_store = store_new();
+	the_store = store_open(NULL);
 	if (!the_store) {
-		log_perror("store_new");
+		log_perror("store_open");
 		exit(1);
 	}
 
@@ -683,5 +667,5 @@ main(int argc, char *argv[])
 		on_net_error(server, "no listeners!");
 
 	server_free(server);
-	store_free(the_store);
+	store_close(the_store);
 }

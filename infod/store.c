@@ -6,39 +6,26 @@
 
 #define STORE_INCREMENT		64		/* store table growth rate */
 
-struct info *
-info_new(uint16_t sz)
-{
-	struct info *info = malloc(sizeof *info + sz);
-	if (!info)
-		return NULL;
-	info->sz = sz;
-	info->refcnt = 1;
-	return info;
-}
-
-void
-info_decref(struct info *info)
-{
-	if (info && !--info->refcnt)
-		free(info);
-}
-
-void
-info_incref(struct info *info)
-{
-	if (info)
-		++info->refcnt;
-}
-
 struct store {
 	unsigned int n;
 	unsigned int max;
 	struct info **info;		/* TODO use an AVL tree */
 };
 
+/* allocate structure with a flexible array member */
+static struct info *
+info_new(uint16_t sz, const char *keyvalue)
+{
+	struct info *info = malloc(sizeof *info + sz);
+	if (!info)
+		return NULL;
+	info->sz = sz;
+	memcpy(info->keyvalue, keyvalue, sz);
+	return info;
+}
+
 struct store *
-store_new()
+store_open(const char *filename /* TODO use */)
 {
 	struct store *store = malloc(sizeof *store);
 	if (!store)
@@ -50,10 +37,10 @@ store_new()
 }
 
 void
-store_free(struct store *store)
+store_close(struct store *store)
 {
 	for (unsigned int i = 0; i < store->n; i++)
-		info_decref(store->info[i]);
+		free(store->info[i]);
 	free(store->info);
 	free(store);
 }
@@ -106,6 +93,7 @@ store_insert(struct store *store, unsigned int i)
 	return i;
 }
 
+/* test if the i'th slot has the given key */
 static int
 store_eq(const struct store *store, unsigned int i, const char *key)
 {
@@ -113,15 +101,22 @@ store_eq(const struct store *store, unsigned int i, const char *key)
 }
 
 int
-store_put(struct store *store, struct info *info)
+store_put(struct store *store, uint16_t sz, const char *keyvalue)
 {
-	unsigned int i = store_find(store, info->keyvalue);
-	if (store_eq(store, i, info->keyvalue)) {
-		/* Found existing identical key; replace it */
-		info_decref(store->info[i]);
+	unsigned int i;
+	struct info *info;
+	info = info_new(sz, keyvalue);
+	if (!info)
+		return -1;
+
+	i = store_find(store, keyvalue);
+	if (store_eq(store, i, keyvalue)) {
+		/* Found existing identical key; free up the slot */
+		free(store->info[i]);
 	} else {
+		/* make space for a new slot */
 		if (store_insert(store, i) == -1) {
-			info_decref(info);
+			free(info);
 			return -1;
 		}
 	}
@@ -129,125 +124,44 @@ store_put(struct store *store, struct info *info)
 	return 0;
 }
 
-void
-store_del(struct store *store, struct info *info)
+int
+store_del(struct store *store, const char *key)
 {
 	unsigned int i;
-	if (!info)
-		return;
-	i = store_find(store, info->keyvalue);
-	if (i < store->n && store->info[i] == info) {
-		info_decref(store->info[i]);
-		--store->n;
-		memmove(&store->info[i], &store->info[i + 1],
-			sizeof store->info[0] * (store->n - i));
-	}
+
+	if (!key)
+		return 0;
+	i = store_find(store, key);
+	if (!store_eq(store, i, key))
+		return 0;
+	free(store->info[i]);
+	--store->n;
+	memmove(&store->info[i], &store->info[i + 1],
+		sizeof store->info[0] * (store->n - i));
+	return 1;
 }
 
-struct info *
+const struct info *
 store_get(struct store *store, const char *key)
 {
 	unsigned int i = store_find(store, key);
 	if (!store_eq(store, i, key))
 		return NULL;
-	info_incref(store->info[i]);
 	return store->info[i];
 }
 
-
-struct index {
-	struct store *store;
-	unsigned int i;		/* Current seek position */
-	struct info *prev;	/* Last returned, or NULL for first */
-};
-
-/* Only support one index at a time */
-static struct index one_index;
-static int one_index_opened;
-
-struct index *
-index_open(struct store *store)
+const struct info *
+store_get_first(struct store *store, struct store_index *ix)
 {
-	struct index *index = &one_index;
-	if (one_index_opened) {
-		errno = ENOMEM;
+	ix->i = 0;
+	return store_get_next(store, ix);
+}
+
+const struct info *
+store_get_next(struct store *store, struct store_index *ix)
+{
+	if (ix->i >= store->n)
 		return NULL;
-	}
-	one_index_opened = 1;
-	index->store = store;
-	index->i = 0;
-	index->prev = NULL;
-	return index;
+	return store->info[ix->i++];
 }
 
-void
-index_close(struct index *index)
-{
-	//assert(index == &one_index);
-	//assert(one_index_opened);
-	info_decref(index->prev);
-	index->prev = NULL;
-	one_index_opened = 0;
-}
-
-struct info *
-index_seek(struct index *index, const char *key)
-{
-	struct info *prev = index->prev;
-	struct store *store = index->store;
-	struct info *info;
-	unsigned int n = store->n;
-	unsigned int i;
-
-	//assert(index == &one_index);
-	//assert(one_index_opened);
-	i = store_find(index->store, key);
-	info = i < n ? store->info[i] : NULL;
-	info_incref(info); /* for the index */
-	info_decref(prev);
-	index->i = i;
-	index->prev = info;
-	return info;
-}
-
-struct info *
-index_next(struct index *index)
-{
-	struct store *store = index->store;
-	struct info *prev = index->prev;
-	unsigned int i = index->i;
-	unsigned int n = store->n;
-	struct info *info;
-
-	//assert(index == &one_index);
-	//assert(one_index_opened);
-
-	if (n == 0) {
-		/* The list was deleted under us: terminate */
-		info = NULL;
-		i = ~0;
-	} else if (!prev && !i) {
-		/* Special case of starting the iterator */
-		info = store->info[0];
-	} else if (!prev) {
-		/* Continuing a terminated iterator: remain terminated */
-		return NULL;
-	} else if (i < n && store->info[i] == prev) {
-		/* Normal case: the list did not change under us */
-		i++;
-		info = i < n ? store->info[i] : NULL;
-	} else {
-		/* Something has changed under us.
-		 * Seek to one step after the previously returned key */
-		i = store_find(index->store, prev->keyvalue);
-		if (store_eq(store, i, prev->keyvalue))
-			i++;
-		info = i < n ? store->info[i] : NULL;
-	}
-
-	index->prev = info;
-	index->i = i;
-	info_incref(info); /* for the index */
-	info_decref(prev);
-	return info;
-}

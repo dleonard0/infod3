@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
+#include <stdarg.h>
 
 #include "store.h"
 
@@ -15,352 +17,271 @@
 static void
 test_empty_store(struct store *store)
 {
-	struct index *index;
+	struct store_index ix;
 
 	/* an empty store can be searched without error */
 	assert(!store_get(store, "noexist"));
 
-	/* an index will show an empty store to be empty */
-	index = index_open(store);
-	assert(index);
-	assert(!index_next(index));
-	index_seek(index, "noexist");
-	assert(!index_next(index));
-	index_close(index);
+	/* there is no first entry in an empty store */
+	assert(!store_get_first(store, &ix));
+
+	/* can delete anything from an empty store with no effect */
+	assert(store_del(store, "anything") == 0);
 }
 
-/* sorted_info: NULL-terminated list of the sorted content infos
- * non_keys: NULL-terminated list of keys that should not exist */
+/* assert that the store contains all of the given infos in the
+ * order given */
+__attribute__((sentinel))
 static void
-test_store(struct store *store, struct info **sorted_info,
-	const char **non_keys)
+assert_store_is_(const char *file, int line, const char *expr,
+	struct store *store, const struct info *expect0, ...)
 {
-	struct info **i, *found;
-	struct index *index;
+	const struct info *found;
+	const struct info *expect;
+	const struct info *i;
+	struct store_index ix;
+	va_list ap;
+	va_list ap2;
 
-	/* We can search for each of the content keys */
-	for (i = sorted_info; *i; i++) {
+	#define FMTi "%s=%.*s"
+	#define ARGi(i) (i) ? (i)->keyvalue : "(null)", \
+			(i) ? (int)((i)->sz - strlen((i)->keyvalue) - 1) : 0, \
+			(i) ? &(i)->keyvalue[strlen((i)->keyvalue) + 1] : 0
+
+	va_start(ap, expect0);
+	va_copy(ap2, ap);
+	/* We can search for each of the content keys, individually */
+	for (expect = expect0;
+	     expect;
+	     expect = va_arg(ap2, const struct info *))
+	{
 		char keybuf[1024];
-		unsigned int orig_refcnt = (*i)->refcnt;
 
-		strncpy(keybuf, (*i)->keyvalue, sizeof keybuf);
+		memset(keybuf, '?', sizeof keybuf);
+		strncpy(keybuf, expect->keyvalue, sizeof keybuf - 1);
 		keybuf[sizeof keybuf - 1] = '\0';
 		found = store_get(store, keybuf);
-		if (found != *i) fprintf(stderr, "keybuf = \"%s\"\n", keybuf);
-		assert(found);
-		assert(found == *i);
-		assert(found->refcnt == orig_refcnt + 1);
-		info_decref(found);
+		if (!found) {
+			fprintf(stderr, "%s:%d: failed %s\n"
+				"\tmissing key %s\n",
+				file, line, expr, keybuf);
+			abort();
+		}
+		if (found->sz != expect->sz ||
+		    memcmp(found->keyvalue, expect->keyvalue, found->sz) != 0)
+		{
+			fprintf(stderr, "%s:%d: failed %s at get '%s'\n"
+				"\texpected value " FMTi ", actual " FMTi "\n",
+				file, line, expr, keybuf,
+				ARGi(expect), ARGi(found));
+			abort();
+		}
 	}
+	va_end(ap2);
 
 	/* We can index over the sorted keys exactly */
-	index = index_open(store);
-	assert(index);
-	for (i = sorted_info; *i; i++) {
-		found = index_next(index);
-		if (found != *i)
-			fprintf(stderr, "i = \"%s\"\n", (*i)->keyvalue);
-		assert(found);
-		assert(found == *i);
+	for (expect = expect0, i = store_get_first(store, &ix);
+	     expect && i;
+	     expect = va_arg(ap, const struct info *),
+	     i = store_get_next(store, &ix))
+	{
+		if (expect->sz != i->sz ||
+		    memcmp(i->keyvalue, expect->keyvalue, i->sz) != 0)
+		{
+			fprintf(stderr, "%s:%d: failed %s\n"
+				"\titeration expected " FMTi " got " FMTi "\n",
+				file, line, expr,
+				ARGi(expect), ARGi(i));
+			abort();
+		}
 	}
-	assert(!index_next(index));
-	index_close(index);
-
-	/* We cannot find any non-keys in the store */
-	if (non_keys)
-	for (; *non_keys; non_keys++) {
-		found = store_get(store, *non_keys);
-		assert(!found);
+	va_end(ap);
+	if (i) {
+		fprintf(stderr, "%s:%d: failed %s\n"
+			"\titeration got unexpected key " FMTi "\n",
+			file, line, expr, ARGi(i));
+		abort();
+	}
+	if (expect) {
+		fprintf(stderr, "%s:%d: failed %s\n"
+			"\titeration omitted expected key " FMTi "\n",
+			file, line, expr, ARGi(expect));
+		abort();
 	}
 }
+#define _S(p) #p
+#define assert_store_is(...) \
+	assert_store_is_(__FILE__, __LINE__, \
+		"test_store" _S((__VA_ARGS__)), \
+		__VA_ARGS__)
 
+/* assert that the store contains none of the keys */
+__attribute__((sentinel))
 static void
-test_index_changing(struct store *store, const char *keyvalue, uint16_t sz)
+assert_store_lacks_(const char *file, int line, const char *expr,
+	struct store *store, const char *key0, ...)
 {
-	struct info *insert;
-	struct index *index;
-	struct info *content[10];
-	struct info *info;
-	unsigned int n = 0;
-	unsigned int i = 0;
+	va_list ap;
+	const char *key;
 
-	insert = info_new(sz);
-	assert(insert);
-	memcpy(insert->keyvalue, keyvalue, sz);
-
-	/* can index over the whole store */
-	index = index_open(store);
-	assert(index);
-	while ((info = index_next(index))) {
-		content[n++] = info;
-		info_incref(info);
-	}
-	index_close(index);
-
-	/* At each position in the store 0..n insert a new info
-	 * index_next() returns consistent values */
-	for (i = 0; i <= n; i++) {
-		unsigned int j;
-		struct info *last;
-		unsigned int expected; /* index sequence length expected */
-
-		index = index_open(store);
-		assert(index);
-
-		/* Predict the length of the sequence that the index
-		 * will yield when inserting 'insert' before the ith
-		 * index_next(). The apparent length of the store
-		 * will be different because we will sometimes insert before
-		 * the moving index pointer and the insert will be
-		 * invisible to the index. */
-		if (i && strcmp(insert->keyvalue, content[i-1]->keyvalue) < 0)
-			expected = n;
-		else
-			expected = n + 1;
-
-		last = NULL;
-		dprintf("+<%s> i=%u e=%u [ ", insert->keyvalue, i, expected);
-		for (j = 0; ; j++) {
-			if (j == i) {
-				dprintf("+ ");
-				info_incref(insert); /* for the store */
-				assert(store_put(store, insert) == 0);
-			}
-			info = index_next(index);
-			if (!info)
-				break;
-			dprintf("<%s> ", info->keyvalue);
-			if (last) {
-				if (strcmp(last->keyvalue, info->keyvalue) >= 0)
-					fprintf(stderr, "last=%s info=%s\n",
-						last->keyvalue, info->keyvalue);
-				assert(strcmp(last->keyvalue, info->keyvalue)<0);
-			}
-			info_incref(info);
-			info_decref(last);
-			last = info;
+	va_start(ap, key0);
+	for (key = key0;
+	     key;
+	     key = va_arg(ap, const char *))
+	{
+		const struct info *i = store_get(store, key);
+		if (i) {
+			fprintf(stderr, "%s:%d: failed %s\n"
+				"\tfound non-key %s = " FMTi "\n",
+				file, line, expr, key, ARGi(i));
+			abort();
 		}
-		dprintf("]\n");
-
-		/* The store_put(insert) happened */
-		assert(j >= i);
-		/* The indexed list was the expected length */
-		if (j != expected)
-			fprintf(stderr, "i=%u j=%u n=%u expected=%u\n",
-				i, j, n, expected);
-		assert(j == expected);
-
-		info_decref(last);
-		index_close(index);
-
-		/* Repeat the index again, but this time delete the insert
-		 * just before the ith index_next(). The delete will be
-		 * invisible if insert would occupy the ith or earlier
-		 * position. */
-		if (i && strcmp(insert->keyvalue, content[i-1]->keyvalue) < 0)
-			expected = n + 1;
-		else
-			expected = n;
-
-		index = index_open(store);
-		assert(index);
-		last = NULL;
-		dprintf("-<%s> i=%u e=%u [ ", insert->keyvalue, i, expected);
-		for (j = 0; ; j++) {
-			if (j == i) {
-				dprintf("- ");
-				store_del(store, insert);
-			}
-			info = index_next(index);
-			if (!info)
-				break;
-			dprintf("<%s> ", info->keyvalue);
-			if (last) {
-				if (strcmp(last->keyvalue, info->keyvalue) >= 0)
-					fprintf(stderr, "last=%s info=%s\n",
-						last->keyvalue, info->keyvalue);
-				assert(strcmp(last->keyvalue, info->keyvalue)<0);
-			}
-			info_incref(info);
-			info_decref(last);
-			last = info;
-		}
-		dprintf("]\n");
-
-		/* The store_del(insert) happened */
-		assert(j >= i);
-		/* The indexed list was the expected length */
-		if (j != expected)
-			fprintf(stderr, "i=%u j=%u n=%u expected=%u\n",
-				i, j, n, expected);
-		assert(j == expected);
-
-		info_decref(last);
-		index_close(index);
 	}
-
-	/* Release content[] */
-	while (n)
-		info_decref(content[--n]);
-	info_decref(insert);
 }
+#define assert_store_lacks(...) \
+	assert_store_lacks_(__FILE__, __LINE__, \
+		"assert_store_contains_noneof_" _S((__VA_ARGS__)), \
+		__VA_ARGS__)
+
+
+#define assert_store_put(store, keyvalue) \
+	assert(store_put(store, sizeof (keyvalue), keyvalue) != -1)
+
+/* flexible constants! */
+#define INFO(kv) \
+	(&((const union { \
+		struct info info; \
+		struct { \
+			uint16_t sz; \
+			char k[sizeof (kv)]; \
+		} info_; \
+	}) { .info_.sz = sizeof (kv), .info_.k = kv }).info)
 
 int
 main()
 {
 	struct store *store;
-	struct info *info;
-	struct info *info0;
-	struct info *info1;
-	struct info *info2;
-	static const char keyvalue0[] = "key0\0data0";
-	static const char keyvalue1[] = "key1\0data1";
-	static const char keyvalue2[] = "key2\0data2";
-	unsigned int i;
+	const char *storefile = NULL;
 
     /* -- empty store -- */
 
 	/* can allocate and immediately free a store */
-	store = store_new();
+	store = store_open(storefile);
 	assert(store);
-	store_free(store);
+	store_close(store);
 
-	store = store_new();
+	store = store_open(storefile);
 	test_empty_store(store);
 
     /* -- single-entry store tests -- */
 
-	/* can allocate the key-value <"key1","value1"> */
-	info1 = info_new(sizeof keyvalue1);
-	assert(info1);
-	memcpy(info1->keyvalue, keyvalue1, sizeof keyvalue1);
-	assert(info1->refcnt == 1);
-
 	/* can store it */
-	assert(store_put(store, info1) == 0);
-	assert(info1->refcnt == 1);	/* ownership was transfered */
+	assert_store_put(store, "key1\0value1");
 
-	test_store(store,
-		(struct info *[]) { info1, NULL },
-		(const char *[]) { "", "key", "key0", "key2", "zzzzzzzz", 0 });
+	assert_store_is(store,
+		INFO("key1\0value1"),
+		NULL);
+	assert_store_lacks(store, "", "key", "key0", "key2", "zzzzzzzz", NULL);
 
     /* -- a store with 2 entries -- */
 
-	/* can allocate <key2,value2> */
-	info2 = info_new(sizeof keyvalue2);
-	assert(info2);
-	memcpy(info2->keyvalue, keyvalue2, sizeof keyvalue2);
-	assert(info2->refcnt == 1);
+	assert_store_put(store, "key2\0value2");
 
-	/* can store it */
-	assert(store_put(store, info2) == 0);
-	assert(info2->refcnt == 1);
-
-	test_store(store,
-		(struct info *[]) { info1, info2, NULL },
-		(const char *[]) { "", "key", "key0", "key3", "zzzzzzzz", 0 });
+	assert_store_is(store,
+		INFO("key1\0value1"),
+		INFO("key2\0value2"),
+		NULL);
+	assert_store_lacks(store, "", "key", "key0", "key3", "zzzzzzzz", NULL);
 
     /* -- a store with 3 entries -- */
 
-	info0 = info_new(sizeof keyvalue0);
-	assert(info0);
-	memcpy(info0->keyvalue, keyvalue0, sizeof keyvalue0);
+	assert_store_put(store, "key0\0value0");
 
-	assert(store_put(store, info0) == 0);
-	assert(info0->refcnt == 1);
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key1\0value1"),
+		INFO("key2\0value2"),
+		NULL);
+	assert_store_lacks(store, "", "key", "key3", "zzzzzzzz", NULL);
 
-	test_store(store,
-		(struct info *[]) { info0, info1, info2, NULL },
-		(const char *[]) { "", "key", "key3", "zzzzzzzz", 0 });
+    /* -- we can't delete a prefix of an existing key */
 
-    /* -- delete each key and add it back again -- */
-	for (i = 0; i < 3; i++) {
-		const char *keys[] = { "key0", "key1", "key2" };
-		struct info *infos[] = { info0, info1, info2 };
+	assert(!store_del(store, "key"));
+	assert(!store_del(store, ""));
 
-		const char *keys_removed[2] = { keys[i], NULL };
-		struct info *infos_left[3];
-		memcpy(infos_left, infos, sizeof infos);
-		for (unsigned int j = 0; j < 2; j++)
-			infos_left[j] = infos[j < i ? j : j + 1];
-		infos_left[2] = NULL;
+    /* -- or an overlong key, or something weird */
 
-		/* get and delete the i'th key */
-		info = store_get(store, keys[i]);
-		assert(info == infos[i]);
-		store_del(store, info);
-		store_del(store, info);	/* double deletes are OK */
-		store_del(store, NULL);	/* deleting NULL is OK */
+	assert(!store_del(store, "key00"));
+	assert(!store_del(store, "value0"));
 
-		/* the store now looks how we expect it to look */
-		test_store(store, infos_left, keys_removed);
+    /* -- deleting null is OK */
 
-		/* Put the orginal back */
-		assert(store_put(store, info) == 0);
-		/* the store is back to normal */
-		test_store(store,
-			(struct info *[]) { info0, info1, info2, NULL },
-			(const char *[]) { "", 0 });
-	}
+	assert(!store_del(store, NULL));
 
-    /* -- replace each key with a different value, then put the original
+    /* -- delete each key (twice) and add it back again (twice),
+          replacing first with a different value, then put the original
           back again -- */
-	for (i = 0; i < 3; i++) {
-		const char *keys[] = { "key0", "key1", "key2" };
-		struct info *infos[] = { info0, info1, info2, NULL };
-		struct info *repl;
 
-		/* get the original i'th entry */
-		const char *key = keys[i];
-		info = store_get(store, key);	/* refcnt original */
-		assert(info == infos[i]);
-		assert(info->refcnt == 2);
+	assert(store_del(store, "key0"));
+	assert(!store_del(store, "key0"));
+	assert_store_is(store,
+		INFO("key1\0value1"),
+		INFO("key2\0value2"),
+		NULL);
+	assert(!store_get(store, "key0"));
+	assert_store_put(store, "key0\0value0!");
+	assert_store_is(store,
+		INFO("key0\0value0!"),
+		INFO("key1\0value1"),
+		INFO("key2\0value2"),
+		NULL);
+	assert_store_put(store, "key0\0value0");
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key1\0value1"),
+		INFO("key2\0value2"),
+		NULL);
 
-		/* construct a replacement, with same key, different data */
-		repl = info_new(5); /* enough room for "keyX\0" */
-		memcpy(repl->keyvalue, key, 5);
+	assert(store_del(store, "key1"));
+	assert(!store_del(store, "key1"));
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key2\0value2"),
+		NULL);
+	assert(!store_get(store, "key1"));
+	assert_store_put(store, "key1\0value1!");
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key1\0value1!"),
+		INFO("key2\0value2"),
+		NULL);
+	assert_store_put(store, "key1\0value1");
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key1\0value1"),
+		INFO("key2\0value2"),
+		NULL);
 
-		/* store the replacement, it replaces the original in-store */
-		assert(store_put(store, repl) == 0);
-		/* the original was decref'd correctly */
-		assert(info->refcnt == 1);
-		/* and the replacement's refcnt did not change */
-		assert(repl->refcnt == 1);
-
-		/* the store now appears with infoX replaced by repl */
-		assert(store_get(store, key) == repl);
-		assert(repl->refcnt == 2);   /* we hold onto it for later */
-		infos[i] = repl;
-		test_store(store, infos, NULL);
-
-		/* put back the original infoX */
-		assert(store_put(store, info) == 0);
-		/* its refcnt will have remained stable */
-		assert(info->refcnt == 1);
-		/* But the previous replacement will have been decref'd */
-		assert(repl->refcnt == 1);
-		/* remove our reference (we held onto it prior) */
-		info_decref(repl);
-	}
-
-    /* -- alter the store while an index is moving -- */
-
-	test_index_changing(store, "key", 4);
-	test_index_changing(store, "key0a", 6);
-	test_index_changing(store, "key1a", 6);
-	test_index_changing(store, "key2a", 6);
-	test_index_changing(store, "zzzzz", 6);
+	assert(store_del(store, "key2"));
+	assert(!store_del(store, "key2"));
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key1\0value1"),
+		NULL);
+	assert(!store_get(store, "key2"));
+	assert_store_put(store, "key2\0value2!");
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key1\0value1"),
+		INFO("key2\0value2!"),
+		NULL);
+	assert_store_put(store, "key2\0value2");
+	assert_store_is(store,
+		INFO("key0\0value0"),
+		INFO("key1\0value1"),
+		INFO("key2\0value2"),
+		NULL);
 
     /* -- cleanup -- */
-	assert(info0->refcnt == 1);
-	assert(info1->refcnt == 1);
-	assert(info2->refcnt == 1);
-
-	/* Incref info2 around so we can see it decref'd by store_free() */
-	info_incref(info2);
-	assert(info2->refcnt == 2);
-	store_free(store);
-	assert(info2->refcnt == 1);
-	info_decref(info2);
-
+	store_close(store);
 }
