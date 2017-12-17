@@ -55,7 +55,7 @@ static struct {
 static const char *
 msg_str(int id)
 {
-	static char other[10];
+	static char other[16];
 	switch (id) {
 	case CMD_HELLO: return "CMD_HELLO";
 	case CMD_SUB: return "CMD_SUB";
@@ -401,7 +401,7 @@ mock_clear()
 }
 
 #define MEGA_SIZE 0x10000 /* too big to send */
-static char Mega[MEGA_SIZE];
+static char Mega[MEGA_SIZE + 1];
 
 /* -- binary protocol tests -- */
 
@@ -722,7 +722,7 @@ test_text_proto()
 	assert_mock_on_sendv(p, "ERROR 255 \"abcd\"\r\n");
 
 	/* Test sending the largest string possible */
-	assert(sizeof Mega >= 0xffff);
+	assert(MEGA_SIZE >= 0xffff);
 	assert(proto_output(p, CMD_PING, "%*s", 0xffff, Mega) != -1);
 	assert(mock_on_sendv.counter > 0);
 	assert(mock_on_sendv.datalen ==
