@@ -6,6 +6,7 @@
 .Nd key-value server
 .Sh SYNOPSIS
 .Nm infod
+.Op Fl f Ar dbfile
 .Op Fl i
 .Op Fl s
 .Op Fl p Ar port
@@ -16,6 +17,9 @@ is a key-value storage server.
 .Pp
 The options are:
 .Bl -tag -offset indent
+.It Fl f Ar dbfile
+Path to a database file.
+The file will be created if missing or empty.
 .It Fl i
 Accept text protocol commands on standard input.
 .It Fl s
