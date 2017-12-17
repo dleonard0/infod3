@@ -415,16 +415,20 @@ on_app_input(struct proto *p, unsigned char msg,
 			    : proto_output(p, MSG_INFO, "%s", data);
 	case CMD_WRITE:
 		if (!contains_nul(data, datalen)) {
-			if (!store_del(the_store, data))
+			/* Delete */
+			int ret = store_del(the_store, data);
+			if (ret == 0)
 				return 1; /* del had no effect */
+			if (ret == -1)
+				return proto_output_error(p,
+					PROTO_ERROR_INTERNAL, "del: %s",
+					strerror(errno));
 		} else {
-			/* check if same value already */
-			info = store_get(the_store, data);
-			if (info &&
-			    info->sz == datalen &&
-			    memcmp(data, info->keyvalue, datalen) == 0)
-				return 1; /* no change */
-			if (store_put(the_store, datalen, data) == -1)
+			/* Put */
+			int ret = store_put(the_store, datalen, data);
+			if (ret == 0)
+				return 1; /* put had no effect */
+			if (ret == -1)
 				return proto_output_error(p,
 					PROTO_ERROR_INTERNAL, "write: %s",
 					strerror(errno));

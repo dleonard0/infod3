@@ -11,7 +11,7 @@
 
 #include "store.h"
 
-/* #define DEBUG */
+#define DEBUG
 #ifdef DEBUG
 # include <stdio.h>
 # define dprintf(...) fprintf(stderr, __VA_ARGS__)
@@ -335,7 +335,7 @@ store_file_open(struct store *store, int fd)
 			i++;
 			continue;
 		}
-		dprintf("store_file_open: removed duplicate %s\n",
+		dprintf("store_file_open: removed duplicate %.100s\n",
 			info->keyvalue);
 		make_hole(store, info, info_after(info, info->sz));
 		store_uninsert(store, i);
@@ -632,7 +632,7 @@ store_info_free(struct store *store, unsigned int i)
 {
 	struct info *info = store->info[i];
 
-	dprintf("del #%u \"%s\" @ %u:%u\n", i, info->keyvalue,
+	dprintf("del #%u \"%.100s\" @ %u:%u\n", i, info->keyvalue,
 		info_offset(store, info),
 		info_offset_after(store, info, info->sz));
 
@@ -733,6 +733,9 @@ store_put(struct store *store, uint16_t sz, const char *keyvalue)
 	/* See if we are replacing an existing key */
 	i = store_find(store, keyvalue);
 	if (store_eq(store, i, keyvalue)) {
+		if (store->info[i]->sz == sz &&
+		    memcmp(store->info[i]->keyvalue, keyvalue, sz) == 0)
+			return 0;
 		/* Resize the existing info (it may move) */
 		info = store_info_realloc(store, i, sz);
 		if (!info)
@@ -748,10 +751,10 @@ store_put(struct store *store, uint16_t sz, const char *keyvalue)
 		store->info[i] = info;
 	}
 
-	dprintf("put \"%s\" @ %u:%u\n", keyvalue,
+	dprintf("put \"%.100s\" @ %u:%u\n", keyvalue,
 		info_offset(store, info), info_offset_after(store, info, sz));
 	memcpy(info->keyvalue, keyvalue, sz);
-	return 0;
+	return 1;
 }
 
 int

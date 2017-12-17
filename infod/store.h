@@ -23,10 +23,12 @@ const struct info *store_get(struct store *store, const char *key);
 /* Inserts new or replaces existing key with the given value.
  * Prereq: the keyvalue must contain a NUL byte to separate the key from
  * the value.
+ * Returns 1 if the value was changed or created.
+ * Returns 0 if the value did not change.
  * Returns -1 if the store failed. */
 int store_put(struct store *store, uint16_t sz, const char *keyvalue);
 /* Delete the key from the store.
- * Returns 1 if the key existe and was deleted.
+ * Returns 1 if the key existed and was deleted.
  * Returns 0 if key did not exist.  */
 int store_del(struct store *store, const char *key);
 
