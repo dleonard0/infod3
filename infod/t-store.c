@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <unistd.h>
 
 #include "store.h"
 
@@ -161,11 +162,12 @@ int
 main()
 {
 	struct store *store;
-	const char *storefile = NULL;
+	const char *storefile = "/tmp/t-store.dat";
 
     /* -- empty store -- */
 
 	/* can allocate and immediately free a store */
+	unlink(storefile);
 	store = store_open(storefile);
 	assert(store);
 	store_close(store);
