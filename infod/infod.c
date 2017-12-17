@@ -22,6 +22,7 @@
 #include "../lib/proto.h"
 #include "../lib/sockunix.h"
 #include "../lib/socktcp.h"
+#include "storepath.h"
 #include "store.h"
 #include "match.h"
 #include "list.h"
@@ -39,6 +40,7 @@ static struct options {
 # define VERBOSE 0
 #endif
 	unsigned char syslog;
+	const char *store_path;
 } options;
 
 /* Single store */
@@ -595,6 +597,7 @@ main(int argc, char *argv[])
 	int error = 0;
 	int ch;
 	static const char *option_flags =
+		"f:"
 		"s"
 #ifndef SMALL
 		"p:"
@@ -602,9 +605,13 @@ main(int argc, char *argv[])
 		"v"
 #endif /* !SMALL */
 		;
+	options.store_path = STORE_PATH;
 
 	while ((ch = getopt(argc, argv, option_flags)) != -1)
 		switch (ch) {
+		case 'f':
+			options.store_path = optarg;
+			break;
 		case 's':
 			options.syslog = 1;
 			break;
@@ -628,12 +635,13 @@ main(int argc, char *argv[])
 		error = 2; /* excess arguments */
 	if (error) {
 		if (error == 2) {
-			fprintf(stderr, "usage: %s "
+			fprintf(stderr, "usage: %s"
 #ifdef SMALL
-						"[-s]"
+						" [-s]"
 #else /* !SMALL */
-						"[-siv] [-p port]"
+						" [-siv] [-p port]"
 #endif /* !SMALL */
+						" [-f db]"
 				"\n",
 				argv[0]);
 		}
@@ -643,9 +651,10 @@ main(int argc, char *argv[])
 	if (options.syslog)
 		openlog(basename(argv[0]), LOG_CONS | LOG_PERROR, LOG_DAEMON);
 
-	the_store = store_open(NULL);
+	the_store = store_open(options.store_path);
 	if (!the_store) {
-		log_perror("store_open");
+		log_msgf(LOG_ERR, "store_open: %s: %s", options.store_path,
+			strerror(errno));
 		exit(1);
 	}
 

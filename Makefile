@@ -3,6 +3,8 @@ CFLAGS += -ggdb -O0 -Wall
 CPPFLAGS += -I.
 #CPPFLAGS += -DSMALL              # disables text protocol and help
 
+STORE_PATH = /run/infod.store
+
 default: check infod/infod info/info
 
 TESTS += t-store
@@ -51,6 +53,10 @@ INFOD_OBJS += infod/server.o
 infod/infod: $(INFOD_OBJS) lib/libinfo3.so
 	$(LINK.c) $(OUTPUT_OPTION) $(INFOD_OBJS) $(LIBS)
 
+infod/infod.o: infod/infod.c storepath.h
+	$(COMPILE.c) $(OUTPUT_OPTION) $<
+storepath.h: Makefile
+	printf '#define STORE_PATH "%s"\n' "$(STORE_PATH)" >$@
 
 INFO_OBJS = info/info.o
 info/info: $(INFO_OBJS) lib/libinfo3.so
@@ -62,6 +68,7 @@ clean:
 	rm -f infod/infod infod/*.o
 	rm -f info/info info/*.o
 	rm -f $(TESTS)
+	rm -f storepath.h
 
 INSTALL = install -D
 prefix = /usr/local
