@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -11,7 +12,7 @@
 
 #include "store.h"
 
-#define DEBUG
+/* #define DEBUG 1 */
 #ifdef DEBUG
 # include <stdio.h>
 # define dprintf(...) fprintf(stderr, __VA_ARGS__)
@@ -19,91 +20,171 @@
 # define dprintf(...) /* nothing */
 #endif
 
+#define offsetof(T, f) ((size_t)&((T *)0)->f)
+
 /*
- * The store has two parts:
- *  - a file-backed page array containing the fragmented/compacted
- *    key-value infos, and
- *  - a heap-allocated pointer array kept in sorted order, that
- *    points into the file-backed info area.
+ * Implements fast, compact storage for <sz,key\0data> elements
+ * (sz<64kB) called 'infos'.
  *
- * The page array is loaded from disk as crash recovery.
- * On insertions, the page array is incrementally compacted by
- * bubbling up 'holes'.
+ *
+ * Objectives
+ *
+ * The primary requirement is holding a stable set of keys with
+ * slowly changing/growing values (e.g. counters or state strings).
+ * Most of the operations on this store will be searching & reading.
+ *
+ * The secondary requirement is surving process kills and restarts.
+ * We want this storage to be robust enough to restart and recover
+ * best effort without assistance. If the case of corrupted keys,
+ * some loss is tolerable. The store need not survive system restarts.
+ *
+ *
+ * Design
+ *
+ * We keep the sorted file index on the heap and keep the info
+ * data within the file-mapped pages. The file should be stored in
+ * a ramdisk and is a multiple of pages. The sorted index is
+ * reconstructed on load/recovery.
+ *
+ * The file contains a sequence of 8-byte-aligned records.
+ * The first two bytes of a record determine the record's type:
+ * either a data record, or a gap record.
+ *
+ *   Data:     uint16 sz            number of bytes following
+ *             char   keyvalue[sz]
+ *             char   empty[*]      pad to next 8 byte boundary
+ *
+ *   Gap:      uint16 sz            0
+ *             uint16 count         number of gap records that follow
+ *             char   empty[4]      pad to next 8 byte boundary
+ *
+ * An expected common case is to reallocate the element at the
+ * end of the file.
+ *
+ *
+ * Allocation strategy
+ *
+ *   Let `s` be the space at the end of the file.
+ *   Let `dd` be the new allocation size required.
+ *
+ * 1. (dd<=s) Easy allocate from the space at the end of the file.
+ *
+ *      +-------.-------.-------+
+ *      | page  : page  : page  |        file use in pages
+ *      +-------'-------'-+-----+
+ *      | data            |   s |        before allocation
+ *      +-----------------+--+--+
+ *      | data            :dd|s'|        after allocation 'dd'
+ *      +-----------------+--+--+
+ *
+ * 2. (dd>s) Repack the data, then and retry.
+ *
+ *    NB: If an entry is being reallocated (sized up), ensure
+ *    that it moves to the end of the (packed) data first, to
+ *    anticipate failure due to ENOSPC.
+ *
+ *    Let `s'` be the space available after repack.
+ *
+ * 2a. (dd>s'), flie is undersized: allocate new file pages
+ *
+ *      +-------.-------.-------+
+ *      | page  : page  : page  |          file use in pages
+ *      +-------'-------'---+---+
+ *      | packed data       | s |          data previously packed
+ *      +-------------------+---+--+
+ *      | packed data       :  dd  |       allocation dd>s won't fit
+ *      +-------.-----+-.---+---.--+----+
+ *      | page  : page  : page  : page  |  extend file
+ *      +-------'-------'---+---+-------+
+ *      | packed data       | s | free  |
+ *      +-------------------+---+-------+
+ *      | packed data       |    s'     |
+ *      +-------------------+------+----+
+ *      | packed data       :  dd  | s" |  allocation fits
+ *      +-------------------+------+----+
+ *
+ * 2b. (dd+2p<=s') sufficient space avail after repack; becomes
+ *                 same as case 1.
+ *
+ *      +-------.-------.-------+
+ *      | page  : page  : page  |        file use in pages
+ *      +-------'-------'---+---+
+ *      | data              | s |        unpacked data and space
+ *      +-------------------+---+--+
+ *      | data              :  dd  |     allocation dd>s won't fit
+ *      +-------------+-----+---+--+
+ *      | packed data |    s'   |        space grows after packing
+ *      +-------------+------+--+
+ *      | packed data :  dd  |s"|        allocation now fits
+ *      +-------------+------+--+
+ *
+ * 2c. If, after packing and allocating there would be
+ *    more than 2*pagesize bytes free, release the excess pages.
+ *    The 2 pages is a hysteresis gap.
+ *
+ *      +-------.-------.-------.-------+
+ *      | page  : page  : page  : page  |
+ *      +-------'-------'-------'-----+-+
+ *      | data                        |s|
+ *      +---------+-------------------+-+
+ *      | packed  |          s'         |
+ *      +---------+--+------------------+
+ *      | packed  :dd|        s"        |  after alloc, s > 2pagesz
+ *      +---------+--+----------.-------+
+ *      | packed  :dd|     s"'  :  free |
+ *      +---------+--+----------.-------+
+ *      | page  : page  : page  :          truncate file
+ *      +-------.-------.-------+
  */
 
-#define INFO_ALIGN		2
 #define MIN(a,b)  ((a) < (b) ? (a) : (b))
+#define MAX(a,b)  ((a) > (b) ? (a) : (b))
 
 #define STORE_INCREMENT		64	/* store.max's growth rate */
 struct store {
-	/* backing file */
+	/* Backing file */
 	int fd;				/* fd to backing file */
 	char *filebase;			/* mapped backing file */
 	uint32_t filesz;		/* mapped extent */
 	uint32_t pagesize;		/* file increment size */
+	uint32_t space;			/* offset to space at end of file */
 
-	uint32_t hole;			/* first hole's offset */
-	uint32_t holesz;		/* first hole's size in bytes */
-	uint32_t space;			/* space at end of file */
-
-	/* Sorted array of pointers into the filestore */
+	/* Sorted index of pointers into the filestore */
 	unsigned int n;
 	unsigned int max;
-	struct info **info;		/* TODO use an AVL tree */
+	struct info **index;		/* TODO use an AVL tree */
+};
+
+/* Minimum size of an element (info or gap) */
+#define INFO_ALIGN	8
+
+/* Memory layout of an 8-byte gap record */
+struct gap {
+	uint16_t zero1;
+	uint16_t zero2;
+	uint32_t size;		/* Size of this gap in bytes */
+};
+
+union record {
+	struct info info;
+	struct gap gap;
 };
 
 static unsigned int store_find(const struct store *store, const char *key);
 
-/* Round up n to an alignment boundary, if it isn't on one already. */
-static size_t
-roundup(size_t n, size_t align)
-{
-	size_t remainder = n % align;
-	return remainder ? n + (align - remainder) : n;
-}
-
-/* Return a pointer to the aligned position after a packed,
- * flexible-length info record. */
-static char *
-info_after(struct info *info, uint16_t sz)
-{
-	char *start = (char *)info;
-	char *end = &info->keyvalue[sz];
-	return start + roundup(end - start, INFO_ALIGN);
-}
-
-/* Returns the offset after an info */
+/* Rounds n up to an alignment boundary, if it isn't on one already.
+ * align must be a power of 2. */
 static uint32_t
-info_offset_after(struct store *store, struct info *info, uint16_t sz)
+roundup(uint32_t n, uint32_t align)
 {
-	return info_after(info, sz) - store->filebase;
+	return (n + (align - 1)) & ~(align - 1);
 }
 
-/* Returns the offset after an info */
-static uint32_t
-info_offset(struct store *store, struct info *info)
-{
-	return (char *)info - store->filebase;
-}
-
-static uint32_t
-info_allocsz(uint16_t sz)
-{
-	return info_after(NULL, sz) - (char *)NULL;
-}
-
-/* Return true if the hole is at the end of the mapped file */
-static int
-hole_is_at_end(struct store *store)
-{
-	return store->hole + store->holesz == store->filesz;
-}
-
-/* Ensure that slot store->info[i] exists,
+/* Ensure that slot store->index[i] exists,
  * expanding store->max as needed.
  * Return -1 on allocation error. */
 static int
-store_ensure(struct store *store, unsigned int i)
+store_index_ensure(struct store *store, unsigned int i)
 {
 	struct info **new_info;
 	unsigned int new_max;
@@ -111,122 +192,42 @@ store_ensure(struct store *store, unsigned int i)
 	if (i < store->max)
 		return 0;
 	new_max = roundup(i + 1, STORE_INCREMENT);
-	new_info = realloc(store->info, new_max * sizeof *new_info);
+	new_info = realloc(store->index, new_max * sizeof *new_info);
 	if (!new_info)
 		return -1;
 	store->max = new_max;
-	store->info = new_info;
+	store->index = new_info;
 	return 0;
 }
 
-/* Inserts a new, uninitialized cell at store->info[i],
+/* Inserts a new, uninitialized cell at store->index[i],
  * shifting up the higher cells to keep them in sorted order.
  * Return -1 on allocation error */
 static int
-store_insert(struct store *store, unsigned int i)
+store_index_insert(struct store *store, unsigned int i)
 {
 	unsigned int n = store->n;
 
-	if (store_ensure(store, n) == -1)
+	if (store_index_ensure(store, n) == -1)
 		return -1;
 	if (i != n)
-		memmove(&store->info[i + 1], &store->info[i],
-			sizeof store->info[0] * (store->n - i));
+		memmove(&store->index[i + 1], &store->index[i],
+			sizeof store->index[0] * (store->n - i));
 	++store->n;
-	store->info[i] = NULL; /* temporary */
+	store->index[i] = NULL; /* unnecessary, but reveals bugs */
 	return i;
 }
 
-/* Removes the cell at store->info[i], shifting higher cells down. */
+/* Removes the cell at store->index[i], shifting higher cells down. */
 void
-store_uninsert(struct store *store, unsigned int i)
+store_index_delete(struct store *store, unsigned int i)
 {
 	--store->n;
-	memmove(&store->info[i], &store->info[i + 1],
-		sizeof store->info[0] * (store->n - i));
+	memmove(&store->index[i], &store->index[i + 1],
+		sizeof store->index[0] * (store->n - i));
 }
 
-static void
-store_hole_scan(struct store *store, char *from)
-{
-	/* Seek to the next hole */
-	struct info *file_end;
-	struct info *next;
-	char *hole_begin;
-	char *hole_end;
-
-	file_end = (struct info *)(store->filebase + store->filesz);
-	next = (struct info *)from;
-
-	while (next < file_end && next->sz)
-		next = (struct info *)info_after(next, next->sz);
-	hole_begin = (char*)next;
-
-	while (next < file_end && !next->sz)
-		next = (struct info *)info_after(next, 0);
-	hole_end = (char *)next;
-
-	store->hole = hole_begin - store->filebase;
-	store->holesz = hole_end - hole_begin;
-
-	dprintf(" store_hole_scan: found hole %u:%u\n", store->hole,
-		store->hole + store->holesz);
-}
-
-/* Update store->hole and store->space */
-static void
-add_hole(struct store *store, uint32_t from, uint32_t to)
-{
-	if (from == to)
-		return;
-	dprintf(" add_hole: %u:%u\n", from, to);
-	if (to + store->space == store->filesz)
-		store->space = store->filesz - from;
-	if (store->holesz == 0 || to < store->hole) {
-		store->hole = from;
-		store->holesz = to - from;
-	} else if (to == store->hole) {
-		store->holesz += to - from;
-		store->hole = from;
-	} else if (from == store->hole + store->holesz) {
-		store->holesz = to - store->hole;
-	}
-}
-
-/* Zero out a range within store->filebase */
-static void
-make_hole(struct store *store, void *fromp, void *top)
-{
-	uint32_t from_offset = (char *)fromp - store->filebase;
-	uint32_t to_offset = (char *)top - store->filebase;
-
-	add_hole(store, from_offset, to_offset);
-	dprintf(" clear %u:%u\n", from_offset, to_offset);
-	memset(fromp, 0, to_offset - from_offset);
-}
-
-static void
-remove_hole(struct store *store, void *fromp, void *top)
-{
-	uint32_t from_offset = (char *)fromp - store->filebase;
-	uint32_t to_offset = (char *)top - store->filebase;
-	uint32_t sz = to_offset - from_offset;
-
-	dprintf(" remove_hole %u:%u\n", from_offset, to_offset);
-	if (store->filesz - to_offset < store->space)
-		store->space = store->filesz - to_offset;
-	if (store->hole == from_offset) {
-		store->hole += sz;
-		store->holesz -= sz;
-		if (!store->holesz)
-			store_hole_scan(store, top);
-	} else if (store->hole < from_offset &&
-		   store->hole + store->holesz >= to_offset)
-	{
-		store->holesz = from_offset - store->hole;
-	}
-}
-
+/* Compares two index entries. Used to sort the index by key */
 static int
 info_compar(const void *av, const void *bv)
 {
@@ -234,6 +235,117 @@ info_compar(const void *av, const void *bv)
 	const struct info * const *b = bv;
 
 	return strcmp((*a)->keyvalue, (*b)->keyvalue);
+}
+
+
+
+/* Size of an info given it's .sz field */
+static uint32_t
+info_size(uint16_t sz)
+{
+	return roundup(offsetof(struct info, keyvalue[sz]), INFO_ALIGN);
+}
+
+static int
+record_is_gap(const union record *record)
+{
+	return record->info.sz == 0;
+}
+
+static void
+record_init_gap(union record *record, uint32_t nbytes)
+{
+	assert(nbytes >= INFO_ALIGN);
+	record->gap.zero1 = 0;
+	record->gap.zero2 = 0;
+	record->gap.size = nbytes - INFO_ALIGN;
+}
+
+static uint32_t
+record_get_size(const union record *record)
+{
+	return record_is_gap(record)
+		? roundup(record->gap.size, INFO_ALIGN) + INFO_ALIGN
+		: info_size(record->info.sz);
+}
+
+/* Convert an info into a gap. Might rewind store->space. */
+static void
+info_make_gap(struct store *store, struct info *info)
+{
+	char *filebase = store->filebase;
+	uint32_t filesz = store->filesz;
+	uint32_t offset = (char *)info - filebase;
+	uint32_t next_offset = offset + info_size(info->sz);
+	union record *record = (union record *)info;
+
+	while (next_offset < filesz) {
+		union record *next_record =
+			(union record *)(filebase + next_offset);
+		uint32_t record_sz = record_get_size(next_record);
+		if (!record_is_gap(next_record))
+			break;
+		/* Be careful with integer overflow */
+		if (next_offset > filesz - record_sz)
+			next_offset = filesz;
+		else
+			next_offset += record_sz;
+	}
+	if (next_offset > filesz)
+		next_offset = filesz;
+	record_init_gap(record, next_offset - offset);
+	if (next_offset == filesz)
+		store->space = offset;
+}
+
+/* Repack the file, and rebuild the sorted index. */
+static void
+store_repack(struct store *store)
+{
+	uint32_t offset;
+	uint32_t w_offset;
+	uint32_t space = store->space;
+	uint32_t filesz = store->filesz;
+	char *filebase = store->filebase;
+	unsigned int i;
+
+	dprintf("repacking: n=%u space=0x%08" PRIx32
+		" filesz=0x%" PRIx32 "\n",
+		store->n, store->space, store->filesz);
+
+	/* Scan 0..space copying down data */
+	offset = 0;
+	w_offset = 0;
+	i = 0;
+	while (offset < space) {
+		const union record *record =
+			(const union record *)(filebase + offset);
+		uint32_t recordsz = record_get_size(record);
+		if (!record_is_gap(record)) {
+			struct info *w_info =
+				(struct info *)(filebase + w_offset);
+			dprintf(" 0x%08" PRIx32 "<-0x%08" PRIx32
+			        " sz=0x%" PRIx32 " key=\"%.30s\"\n",
+				w_offset, offset, recordsz, w_info->keyvalue);
+			if (w_offset != offset)
+				memmove(w_info, record, recordsz);
+			store_index_ensure(store, i);
+			store->index[i++] = w_info;
+			w_offset += recordsz;
+		}
+		offset += recordsz;
+	}
+	space = w_offset;
+	assert(space <= store->space);
+	if (space < store->filesz)
+		record_init_gap((union record *)(filebase + space),
+			filesz - space);
+	store->space = space;
+	store->n = i;
+	qsort(store->index, store->n, sizeof store->index[0], info_compar);
+
+	dprintf("repacked:  n=%u space=0x%08" PRIx32 " filesz=0x%" PRIx32 "\n",
+		store->n, store->space, store->filesz);
 }
 
 /* Load or initialize a backing file */
@@ -244,101 +356,84 @@ store_file_open(struct store *store, int fd)
 	uint32_t filesz;
 	char *filebase;
 	uint32_t offset;
+	unsigned int n;
 	int i;
 
 	/* Open the file and find its physical size */
 	if (fstat(fd, &st) == -1)
 		return -1;
-	if (st.st_size > UINT32_MAX) {
+	if (st.st_size >= UINT32_MAX) {
 		errno = ENOSPC;
 		return -1;
 	}
 	store->pagesize = getpagesize();
 
-	/* Expand the file up to a page boundary if needed */
-	if (st.st_size < store->pagesize)
-		filesz = store->pagesize;
-	else
-		filesz = roundup(st.st_size, store->pagesize);
+	/* Expand the file to meet a page boundary */
+	filesz = MAX(store->pagesize, roundup(st.st_size, store->pagesize));
 	if (filesz > st.st_size) {
 		if (ftruncate(fd, filesz) == -1)
 			return -1;
 	}
 
-	/* Map in file */
+	dprintf("stat sz=0x%lx filesz=0x%" PRIx32 "\n", st.st_size, filesz);
+
+	/* Map the file into the address space */
 	filebase = mmap(NULL, filesz, PROT_READ | PROT_WRITE, MAP_SHARED,
 		fd, 0);
 	if ((void *)filebase == MAP_FAILED)
 		return -1;
 
-	/* After this point we are committed and can only return 0 */
-	store->fd = fd;
-	store->filebase = filebase;
-	store->filesz = filesz;
-
 	/* If we'd increased the file's size, zero out that part right now */
 	if (filesz > st.st_size)
 		memset(filebase + st.st_size, 0, filesz - st.st_size);
 
-	/* Scan the file looking for (unordered) info chunks. */
-	store->n = 0;
-	store->hole = filesz;
-	store->holesz = 0;
-	store->space = filesz;
+	/* Scan the number of data records in the file.
+	 * If corrupted entries are found, just truncate. */
 	offset = 0;
-	while (offset <= filesz) {
-		struct info *info = (struct info *)(filebase + offset);
-		uint32_t next_offset = info_after(info, info->sz) - filebase;
+	n = 0;
+	while (offset < filesz) {
+		union record *record = (union record *)(filebase + offset);
+		uint32_t record_sz = record_get_size(record);
 
-		if (!info->sz) {
-			/* Discovered hole */
-			while (next_offset < filesz) {
-				if (((struct info *)(filebase +
-					    next_offset))->sz)
-					break;
-				next_offset += INFO_ALIGN;
-			}
-			add_hole(store, offset, next_offset);
-			offset = next_offset;
-			continue;
-		}
-		if (next_offset > filesz)
-			break; /* size exceeds file: bad info */
-		if (!memchr(info->keyvalue, 0, info->sz))
-			break; /* keyvalue didn't contain a NUL: bad info */
-		/* Discovered good info */
-		i = store_insert(store, store->n);
-		if (i == -1)
-			break; /* no space left in list */
-		/* remove_hole(store, info, next_offset + filebase); */
-		store->info[i] = info;
-		offset = next_offset;
-		store->space = filesz - offset;
+#if 0
+		dprintf("  +0x%08" PRIx32 ": %4s sz=0x%" PRIx32 "\n",
+			offset, record_is_gap(record) ? "gap" : "info",
+			record_sz);
+#endif
+
+		if (offset > filesz - record_sz)
+			break; /* Too big */
+		if (!record_is_gap(record))
+			n++;
+		offset += record_sz;
 	}
-	if (offset < filesz) {
-		/* Hole at end of file */
-		make_hole(store, filebase + offset, filebase + filesz);
+	if (n && store_index_ensure(store, n - 1) == -1) {
+		(void )munmap(filebase, filesz);
+		return -1;
 	}
 
-	dprintf("store_file_open: n=%u filesz=%u space=%u hole=%u:%u\n",
-		store->n, store->filesz, store->space,
-		store->hole, store->hole + store->holesz);
+	/* After this point we are committed and can only return 0 */
 
-	/* Sort the found infods (there may be duplicates) */
-	qsort(store->info, store->n, sizeof store->info[0], info_compar);
+	store->fd = fd;
+	store->filebase = filebase;
+	store->filesz = filesz;
+	store->space = offset;
 
-	/* De-duplicate the infos */
+	/* Repack the store, creating the index */
+	store_repack(store);
+
+	/* De-duplicate */
 	i = 1;
 	while (i < store->n) {
-		struct info *info = store->info[i];
-		if (strcmp(store->info[i-1]->keyvalue, info->keyvalue) != 0) {
+		struct info *info = store->index[i];
+		if (strcmp(store->index[i-1]->keyvalue, info->keyvalue) != 0) {
 			i++;
 			continue;
 		}
 		dprintf("store_file_open: removed duplicate %.100s\n",
 			info->keyvalue);
-		make_hole(store, info, info_after(info, info->sz));
-		store_uninsert(store, i);
+		info_make_gap(store, info);
+		store_index_delete(store, i);
 	}
 
 	return 0;
@@ -352,10 +447,9 @@ store_file_close(struct store *store)
 	store->filebase = NULL;
 }
 
-/* Change the size of the backing file.
- * Adjusts the hole if needed */
+/* Change the size of the backing file. */
 static int
-store_set_filesize(struct store *store, uint32_t new_filesz)
+store_file_setsize(struct store *store, uint32_t new_filesz)
 {
 	char *new_base;
 	char *old_base = store->filebase;
@@ -381,138 +475,97 @@ store_set_filesize(struct store *store, uint32_t new_filesz)
 	(void) munmap(old_base, old_filesz);
 	/* Adjust the sorted pointers to use the new mapping */
 	for (i = 0; i < store->n; i++)
-		if (store->info[i])
-			store->info[i] = (struct info *)(new_base +
-				((char *)store->info[i] - old_base));
+		if (store->index[i])
+			store->index[i] = (struct info *)(new_base +
+				((char *)store->index[i] - old_base));
 
 	if (new_filesz < old_filesz) {
 		/* Shrink the file */
 		if (ftruncate(store->fd, new_filesz) == -1)
 			new_filesz = old_filesz; /* failed to shrink? */
-		if (store->hole > new_filesz) {
-			store->hole = new_filesz;
-			store->holesz = 0;
-		} else if (store->hole + store->holesz > new_filesz)
-			store->holesz = new_filesz - store->hole;
 	} else if (new_filesz > old_filesz) {
+#if 0
 		/* Zero the end of the file */
 		memset(new_base + old_filesz, 0, new_filesz - old_filesz);
-		add_hole(store, old_filesz, new_filesz);
+#endif
 	}
 	store->filesz = new_filesz;
 	return 0;
 }
 
-/* Move the early hole up, towards the end of the file, by
- * moving an info record down into its place.
- * Never alters filebase mapping, but may alter some store->info[] */
-static void
-store_file_compact1(struct store *store)
-{
-	char *dst;
-	char *src;
-	char *src_end;
-	struct info *info;
-	unsigned int i;
-	uint32_t infosz;
-	char *hole_end;
-	char *file_end;
-	uint16_t dirtysz;
-
-	if (hole_is_at_end(store))
-		return;
-
-	dst = store->filebase + store->hole;
-	src = store->filebase + store->hole + store->holesz;
-	info = (struct info *)src;
-	src_end = info_after(info, info->sz);
-	infosz = src_end - src;
-
-	/* Find the sorted pointer we'll need to update */
-	i = store_find(store, info->keyvalue);
-	if (i >= store->n || store->info[i] != info)
-		abort();
-
-	/* Move it down */
-	memmove(dst, src, src_end - src);
-
-	/* Zero out the dirty leftover */
-	dirtysz = MIN(store->holesz, infosz);
-	memset(src_end - dirtysz, 0, dirtysz);
-
-	/* adjust store->info[i] and the store->hole pointer */
-	store->info[i] = (struct info *)dst;
-	store->hole += infosz;
-
-	/* Discover and coallesce next hole */
-	hole_end = store->filebase + (store->hole + store->holesz);
-	file_end = store->filebase + store->filesz;
-	while (hole_end < file_end) {
-		info = (struct info *)hole_end;
-		if (info->sz)
-			break;
-		hole_end = info_after(info, 0);
-	}
-	store->holesz = hole_end - (store->filebase + store->hole);
-}
-
 /* Trim off excess pages from the mapped file. */
 static void
-store_file_trim_excess(struct store *store)
+store_file_trim(struct store *store)
 {
-	if (hole_is_at_end(store)) {
-		/* The excess is the set of empty whole pages at the
-		 * end of the file. If we have more than two pages
-		 * of excess, trim all but one (hysteresis). */
-		uint32_t trimmedsz = roundup(store->hole, store->pagesize) +
-			store->pagesize;
-		if (store->filesz > trimmedsz)
-			store_set_filesize(store, trimmedsz);
+	uint32_t space = store->space;
+	uint32_t filesz = store->filesz;
+	uint32_t maxfilesz = roundup(space + 3 * store->pagesize, store->pagesize);
+
+	if (filesz > maxfilesz) {
+		union record *rec;
+		uint32_t newfilesz = roundup(space + store->pagesize,
+			store->pagesize);
+		store_file_setsize(store, newfilesz);
+		rec = (union record *)(store->filebase + space);
+		record_init_gap(rec, store->filesz - space);
 	}
 }
 
-static void
-store_file_compact(struct store *store)
-{
-	store_file_compact1(store);
-	store_file_trim_excess(store);
-}
-
-/* Allocate an info from the hole.
- * Returns NULL if there is no space.
- * Returns pointer to a new info with info->sz set to sz*/
 static struct info *
-store_hole_alloc(struct store *store, uint16_t sz)
+store_file_alloc(struct store *s, uint16_t sz)
 {
 	struct info *info;
-	uint32_t allocsz = info_allocsz(sz);
+	uint32_t allocsz = info_size(sz);
 
-	if (!sz) {
-		errno = EINVAL;
-		return NULL;
+	if (allocsz > s->filesz - s->space)
+		store_repack(s);
+	if (allocsz > s->filesz - s->space) {
+		uint32_t newfilesz;
+
+		if (s->filesz >= UINT32_MAX - allocsz) {
+			errno = ENOSPC;
+			return NULL;
+		}
+		newfilesz = roundup(s->space + allocsz, s->pagesize);
+		if (store_file_setsize(s, newfilesz) == -1)
+			return NULL;
 	}
 
-	while (store->holesz < allocsz) {
-		if (hole_is_at_end(store)) {
-			uint32_t new_size = roundup(store->hole +
-				allocsz, store->pagesize);
-			if (store_set_filesize(store, new_size) == -1)
-				return NULL;
-		} else
-			store_file_compact1(store);
+	assert(allocsz <= s->filesz - s->space);
+	info = (struct info *)(s->filebase + s->space);
+	s->space += allocsz;
+	if (s->space < s->filesz) {
+		union record *rec;
+		rec = (union record *)(s->filebase + s->space);
+		record_init_gap(rec, s->filesz - s->space);
 	}
-
-	info = (struct info *)(store->filebase + store->hole);
 	info->sz = sz;
-	remove_hole(store, info, info_after(info, sz));
-	if (!store->holesz)
-		store_file_compact(store);
 	return info;
+}
 
+/* Converts an info into a gap */
+static void
+store_file_dealloc(struct store *store, struct info *info)
+{
+	uint32_t offset = (char *)info - store->filebase;
+	uint32_t gapsz = info_size(info->sz);
+	uint32_t after_offset = offset + gapsz;
+	union record *after_record;
+
+	if (after_offset == store->space) {
+		store->space = offset;
+		store_file_trim(store);
+	} else {
+		after_record =
+			(union record *)(store->filebase + after_offset);
+		if (record_is_gap(after_record))
+			gapsz += record_get_size(after_record);
+		record_init_gap((union record *)info, gapsz);
+	}
 }
 
 /*
- * Resize an existing store->info[i], being careful to not lose any data
+ * Resize an existing store->index[i], being careful to not lose any data
  * should an allocation fail.
  * The content of the resized info will be undefined.
  * Returns NULL if we can't grow the file mapping.
@@ -520,124 +573,107 @@ store_hole_alloc(struct store *store, uint16_t sz)
 static struct info *
 store_info_realloc(struct store *store, unsigned int i, uint16_t new_sz)
 {
-	struct info *new_info;
-	struct info *info = store->info[i];
+	struct info *info = store->index[i];
+	uint32_t offset = (char *)info - store->filebase;
 	uint16_t old_sz = info->sz;
-	uint32_t new_alloc = info_allocsz(new_sz);
-	uint32_t old_alloc = info_allocsz(old_sz);
+	uint32_t new_alloc = info_size(new_sz);
+	uint32_t old_alloc = info_size(old_sz);
 	uint32_t grow;
-	uint32_t old_end;
-	char *p;
-	char *new_after;
-	char *old_after;
+	union record *after_record;
+
+	assert(offset < store->filesz);
+	assert((offset % INFO_ALIGN) == 0);
 
 	if (new_alloc == old_alloc) {
 		/* The allocation can stay the same size */
 		info->sz = new_sz;
 		return info;
 	}
+
+	/* Find the record following (old) 'info' */
+	if (offset + old_alloc == store->space)
+		after_record = NULL;
+	else
+		after_record =
+			(union record *)(store->filebase + offset + old_alloc);
+
 	if (new_alloc < old_alloc) {
 		/* Shrinking allocation: new_sz < old_sz */
-		make_hole(store, info_after(info, new_sz),
-			info_after(info, old_sz));
 		info->sz = new_sz;
-		store_file_trim_excess(store);
-		return store->info[i];
-	}
-
-	/* Growing allocation; see if we happen to be followed
-	 * by enogh empty space to grow into. */
-	grow = new_alloc - old_alloc;
-	old_after = info_after(info, old_sz);
-	new_after = old_after + grow;
-	for (p = old_after; p < new_after; p += sizeof (struct info))
-		if (((struct info *)p)->sz)
-			break;
-	if (p == new_after) {
-		remove_hole(store, old_after, new_after);
-		info->sz = new_sz;
-		return info;
-	}
-
-	/* Compact this and earlier info records. */
-	if (store->hole < info_offset(store, info)) {
-		do {
-			store_file_compact1(store);
-		} while (store->hole < info_offset(store, store->info[i]));
-		/* At this point info has moved backward,
-		 * and a hole has opened up in front of us */
-		info = store->info[i];
-		old_after = info_after(info, old_sz);
-		new_after = old_after + grow;
-	}
-	old_end = info_offset_after(store, info, old_sz);
-
-	if (old_end == store->hole) {
-		/* There is now a hole immediately following us, as big as
-		 * we could compact. */
-		uint32_t new_end = old_end + grow;
-		if (new_end > store->filesz && hole_is_at_end(store)) {
-			/* The hole is at the end of the file, and
-			 * it is still not big enough. Because there is
-			 * nothing left to compacted, there is no other
-			 * option but to grow the backing file. */
-			uint32_t new_filesz = roundup(new_end,store->pagesize);
-			if (store_set_filesize(store, new_filesz) == -1)
-				return NULL;
-			/* Re-mapping the file may have changed pointers: */
-			info = store->info[i];
-			old_end = info_offset_after(store, info, old_sz);
-			/* Fallthrough to one of the next two branches */
-			assert(store->holesz >= grow);
-		}
-		if (store->holesz >= grow) {
-			/* The hole is big enough to grow into */
-			info->sz = new_sz;
-			remove_hole(store, info, info_after(info, new_sz));
+		if (!after_record) {
+			/* Space grows backwards */
+			store->space = offset + new_alloc;
+			store_file_trim(store);
+			return store->index[i]; /* (may have remapped) */
+		} else {
+			/* Create new gap */
+			uint32_t gap_offset = offset + new_alloc;
+			union record *new_gap =
+				(union record *)(store->filebase + gap_offset);
+			uint32_t new_gap_size = old_alloc - new_alloc;
+			if (record_is_gap(after_record)) {
+				/* Merge with gap afterward */
+				new_gap_size += record_get_size(after_record);
+			}
+			record_init_gap(new_gap, old_alloc - new_alloc);
 			return info;
 		}
 	}
 
-	/* At this point we abandon being able to re-use the
-	 * existing info. The strategy now changes to allocating a
-	 * new info. We take this opportunity to compact the data;
-	 * even though we will leave a gap later. */
-	while (!hole_is_at_end(store)) {
-		store_file_compact1(store);
-		/* No need to recompute info, because we guaranteed
-		 * earlier that the hole > info */
+	grow = new_alloc - old_alloc;
+
+	/* Growing allocation; try to use a following gap to grow into */
+	if (after_record && record_is_gap(after_record)) {
+		uint32_t after_size = record_get_size(after_record);
+		if (after_size == grow) {
+			info->sz = new_sz;
+			return info;
+		}
+		if (after_size > grow) {
+			union record *new_gap =
+				(union record *)(store->filebase +
+				    offset + new_alloc);
+			record_init_gap(new_gap, after_size - grow);
+			info->sz = new_sz;
+			return info;
+		}
 	}
 
-	if (new_alloc < store->holesz) {
-		/* The hole at the end is not big enough to allocate from,
-		 * so, make the file bigger */
-		uint32_t new_end = store->hole + new_alloc;
-		uint32_t new_filesz = roundup(new_end,store->pagesize);
-		if (store_set_filesize(store, new_filesz) == -1)
-			return NULL;
-		/* Re-mapping the file may have changed pointers: */
-		info = store->info[i];
+	/* At this point it is clear we have to make the old info a gap */
+	if (after_record && record_is_gap(after_record))
+		record_init_gap((union record *)info,
+			old_alloc + record_get_size(after_record));
+	else
+		record_init_gap((union record *)info, old_alloc);
+	/* (store->index[i] is now an invalid pointer) */
+
+	if (new_alloc < store->filesz - store->space) {
+		/* A simple allocation in the space will work */
+		info = store->index[i] = store_file_alloc(store, new_sz);
+		return info;
 	}
 
-	new_info = (struct info *)(store->filebase + store->hole);
-	new_info->sz = new_sz;
-	remove_hole(store, new_info, info_after(new_info, new_sz));
-	make_hole(store, info, info_after(info, old_sz));
-	store->info[i] = new_info;
-	return new_info;
+	/* delete index[i] properly */
+	store_index_delete(store, i);
+	info = store_file_alloc(store, new_sz);
+	if (!info)
+		return NULL;
+
+	/* Because the index will remain sorted, and the info will
+	 * have the same key, we can simply re-insert index[i].
+	 * It cannot return -1 because we'd just deleted an entry */
+
+	(void) store_index_insert(store, i);
+	store->index[i] = info;
+	return info;
 }
 
 static void
 store_info_free(struct store *store, unsigned int i)
 {
-	struct info *info = store->info[i];
-
-	dprintf("del #%u \"%.100s\" @ %u:%u\n", i, info->keyvalue,
-		info_offset(store, info),
-		info_offset_after(store, info, info->sz));
-
-	make_hole(store, info, info_after(info, info->sz));
-	store->info[i] = NULL;
+	struct info *info = store->index[i];
+	store_file_dealloc(store, info);
+	store->index[i] = NULL;
 }
 
 struct store *
@@ -655,7 +691,7 @@ store_open(const char *filename)
 		return NULL;
 	store->n = 0;
 	store->max = 0;
-	store->info = NULL;
+	store->index = NULL;
 	store->filebase = NULL;
 	store->fd = -1;
 
@@ -681,9 +717,9 @@ store_close(struct store *store)
 {
 #if 0
 	for (unsigned int i = 0; i < store->n; i++)
-		free(store->info[i]);
+		free(store->index[i]);
 #endif
-	free(store->info);
+	free(store->index);
 	store_file_close(store);
 	if (store->fd != -1)
 		close(store->fd);
@@ -691,7 +727,7 @@ store_close(struct store *store)
 }
 
 /* Binary search to one more than the largest index into
- * store->info[] that has a key lexicographically
+ * store->index[] that has a key lexicographically
  * smaller than 'key'. In other words, find the slot
  * having the same key, or where the slot would be
  * if the key were in the info[] list. */
@@ -699,7 +735,7 @@ static unsigned int
 store_find(const struct store *store, const char *key)
 {
 	unsigned int a, b, m;
-	struct info **list = store->info;
+	struct info **list = store->index;
 
 	a = 0;
 	b = store->n;
@@ -721,7 +757,7 @@ store_find(const struct store *store, const char *key)
 static int
 store_eq(const struct store *store, unsigned int i, const char *key)
 {
-	return i < store->n && strcmp(key, store->info[i]->keyvalue) == 0;
+	return i < store->n && strcmp(key, store->index[i]->keyvalue) == 0;
 }
 
 int
@@ -733,26 +769,26 @@ store_put(struct store *store, uint16_t sz, const char *keyvalue)
 	/* See if we are replacing an existing key */
 	i = store_find(store, keyvalue);
 	if (store_eq(store, i, keyvalue)) {
-		if (store->info[i]->sz == sz &&
-		    memcmp(store->info[i]->keyvalue, keyvalue, sz) == 0)
+		if (store->index[i]->sz == sz &&
+		    memcmp(store->index[i]->keyvalue, keyvalue, sz) == 0)
 			return 0;
 		/* Resize the existing info (it may move) */
 		info = store_info_realloc(store, i, sz);
 		if (!info)
 			return -1;
 	} else {
-		info = store_hole_alloc(store, sz);
+		info = store_file_alloc(store, sz);
 		if (!info)
 			return -1;
-		if (store_insert(store, i) == -1) {
-			make_hole(store, info, info_after(info, sz));
+		if (store_index_insert(store, i) == -1) {
+			store_file_dealloc(store, info);
 			return -1;
 		}
-		store->info[i] = info;
+		store->index[i] = info;
 	}
 
-	dprintf("put \"%.100s\" @ %u:%u\n", keyvalue,
-		info_offset(store, info), info_offset_after(store, info, sz));
+	dprintf("put \"%.100s\" @ 0x%08zx\n", keyvalue,
+		(char *)info - store->filebase);
 	memcpy(info->keyvalue, keyvalue, sz);
 	return 1;
 }
@@ -767,8 +803,10 @@ store_del(struct store *store, const char *key)
 	i = store_find(store, key);
 	if (!store_eq(store, i, key))
 		return 0;
+	dprintf("del \"%.100s\" @ 0x%08zx\n", key,
+		(char *)store->index[i] - store->filebase);
 	store_info_free(store, i);
-	store_uninsert(store, i);
+	store_index_delete(store, i);
 	return 1;
 }
 
@@ -778,7 +816,7 @@ store_get(struct store *store, const char *key)
 	unsigned int i = store_find(store, key);
 	if (!store_eq(store, i, key))
 		return NULL;
-	return store->info[i];
+	return store->index[i];
 }
 
 const struct info *
@@ -793,6 +831,6 @@ store_get_next(struct store *store, struct store_index *ix)
 {
 	if (ix->i >= store->n)
 		return NULL;
-	return store->info[ix->i++];
+	return store->index[ix->i++];
 }
 
