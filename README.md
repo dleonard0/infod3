@@ -13,8 +13,8 @@ Start your server.
 Let's store the value *Tim* under the key *name*
 using the `info` tool.
 
-    $ info -w name=Tim
-    $ info -r name
+    $ info name=Tim
+    $ info name
     Tim
 
 If you thought that was cool, hold onto your pants.
@@ -38,7 +38,7 @@ The binary AF\_UNIX interface is much more efficient.
 It's what the CLI tools and C library use.
 See [PROTOCOL](PROTOCOL) for details.
 
-    $ info -r name
+    $ info name
     Fred
 
 ## Subscribe-notify
@@ -59,7 +59,7 @@ Let's subscribe on the left, and make changes on the right:
     foo snort
                                 $ info -d foo
     foo
-                                $ info -w foo=fighters
+                                $ info foo=fighters
     foo fighters
     ^C
 
