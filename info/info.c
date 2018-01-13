@@ -114,18 +114,28 @@ main(int argc, char *argv[])
 		break;
 	}
 
-	/* Check command options */
+	/* Check command options. No processing at this stage,
+	 * we just verify that we will understand them later inside
+	 * the transaction. */
 	for (i = optind; !error && i < argc; i++) {
 		const char *opt = argv[i];
 		const char *arg;
 		if (*opt != '-')
-			continue; /* assume -r */
-		if (opt[2] || !strchr("rwds", opt[1])) {
+			continue;	/* assume implied -r or -w */
+		if (!strchr("rwds", opt[1])) {
+#ifndef SMALL
+			if (strchr("bkt", opt[1]))
+				fprintf(stderr, "-%c specified too late\n",
+					opt[1]);
+#endif
 			fprintf(stderr, "bad option %s\n", opt);
 			error = 2;
 			break;
 		}
-		arg = argv[i + 1];
+		if (opt[2])
+			arg = &opt[2];
+		else
+			arg = argv[++i];
 		if (!arg) {
 			fprintf(stderr, "missing arg after %s\n", opt);
 			error = 2;
@@ -136,7 +146,6 @@ main(int argc, char *argv[])
 			error = 2;
 			break;
 		}
-		i++;
 	}
 
 	if (error) {
@@ -153,6 +162,7 @@ main(int argc, char *argv[])
 	}
 #endif
 
+	/* Start the transaction */
 	if (info_tx_begin() == -1)
 		goto fail;
 	for (i = optind; !error && i < argc; i++) {
@@ -160,11 +170,13 @@ main(int argc, char *argv[])
 		char *data = NULL;
 		char *value;
 
-		if (*opt != '-') {
-			data = opt;
-			opt = "-r";
-		} else
-			data = argv[++i];
+		if (*opt != '-') {		/* data      -> -r data */
+			data = opt;		/* data=data -> -w data=data */
+			opt = strchr(data, '=') ? "-w" : "-r";
+		} else if (opt[2])
+			data = opt + 2;		/* -Xdata */
+		else
+			data = argv[++i];	/* -X data */
 
 		switch (opt[1]) {
 		case 'r':
