@@ -32,15 +32,28 @@ int info_tx_write(const char *key, const char *value, unsigned int valuesz);
 int info_tx_delete(const char *key);
 int info_tx_sub(const char *pattern);
 /* Commit the transaction. The optional callback will receive all tx_read
- * and tx_sub initial results. The callback should return 1 to continue,
- * or 0 to terminate. */
+ * and tx_sub initial results.
+ * Internally, a PING command is sent, and the callback is invoked until
+ * the cb function returns <=0 or the synchronizing PONG is received.
+ * If the cb functoin returns <= 0 this function aborts and sends that
+ * immediately. */
 int info_tx_commit(int (*cb)(const char *key,
 	const char *value, unsigned int sz));
 
-/* Wait for more updates from a subscription. If the cb returns 0 the wait
- * loop will terminate and return 0 */
+/* Wait for more updates from a subscription prepared by info_tx_sub().
+ * This function loops while the cb function returns >0.
+ * If the cb function returns <=0 then this function will immediately
+ * return that value. */
 int info_sub_wait(int (*cb)(const char *key,
 	const char *value, unsigned int sz));
+
+/* Operations that are safe to call from within a callback. These
+ * do not use transactions, wait for responses nor synchronize with pings. */
+int info_read_nowait(const char *key);
+int info_write_nowait(const char *key, const char *value, unsigned int valuesz);
+int info_delete_nowait(const char *key);
+int info_sub_nowait(const char *pattern);
+int info_unsub_nowait(const char *pattern);
 
 /* Returns the last error message received from the server. */
 const char *info_get_last_error(void);

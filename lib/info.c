@@ -23,7 +23,8 @@ unsigned int info_retries = 100;
 
 static struct {
 	unsigned char until_msg;	/* on arrival, increments done */
-	int done;
+	int in_cb;			/* true while inside callback */
+	int done;			/* true when until_msg received */
 	struct info_bind *binds;
 	const char *exists_key;
 	int exists_ret;
@@ -34,14 +35,64 @@ static struct {
 		unsigned int sz);
 } waitret;
 
-static void
-waitret_init()
+int
+info_read_nowait(const char *key)
 {
-	memset(&waitret, 0, sizeof waitret);
+	if (info_open(NULL) == -1)
+		return -1;
+	return proto_output(proto, CMD_READ, "%s", key);
 }
 
-/* Copy the value from a MSG_INFO into the info_bind, allocating
- * space from waitret.buffer. Returns -1 on error (ie ENOMEM) */
+int
+info_write_nowait(const char *key, const char *value, unsigned int valuesz)
+{
+	if (info_open(NULL) == -1)
+		return -1;
+	return proto_output(proto, CMD_WRITE, "%s%c%*s",
+	    key, 0, valuesz, value);
+}
+
+int
+info_delete_nowait(const char *key)
+{
+	if (info_open(NULL) == -1)
+		return -1;
+	return proto_output(proto, CMD_WRITE, "%s", key);
+}
+
+int
+info_sub_nowait(const char *pattern)
+{
+	if (info_open(NULL) == -1)
+		return -1;
+	return proto_output(proto, CMD_SUB, "%s", pattern);
+}
+
+int
+info_unsub_nowait(const char *pattern)
+{
+	if (info_open(NULL) == -1)
+		return -1;
+	return proto_output(proto, CMD_UNSUB, "%s", pattern);
+}
+
+/* Initialize the waitret status.
+ * Return -1 (EBUSY) if the waitret's callback is active.
+ * (That means a recursive response wait was attempted) */
+static int
+waitret_init()
+{
+	if (waitret.in_cb) {
+		errno = EBUSY;
+		return -1;
+	}
+	memset(&waitret, 0, sizeof waitret);
+	return 0;
+}
+
+/* Fills in a variable binding using the keyvalue from data[],
+ * and allocating storage from waitret.buffer.
+ * Returns -1 on ENOMEM, 0 on success. */
 static int
 waitret_info(struct info_bind *b, const char *data, unsigned int datalen)
 {
@@ -68,7 +119,8 @@ waitret_info(struct info_bind *b, const char *data, unsigned int datalen)
 	return 0;
 }
 
-/* Called from wait_until_done as messages arrive */
+/* This procedure is indirectly called from wait_until_done().
+ * It handles each received message according to the settings in waitret. */
 static int
 wait_on_input(struct proto *p, unsigned char msg,
 	const char *data, unsigned int datalen)
@@ -106,10 +158,12 @@ wait_on_input(struct proto *p, unsigned char msg,
 			value = data + keylen + 1;
 			valuesz = datalen - (keylen + 1);
 		}
+		waitret.in_cb = 1;
 		if (waitret.info_cb(data, value, valuesz) == 0) {
 			if (waitret.until_msg == MSG_EOF)
 				waitret.done++;
 		}
+		waitret.in_cb = 0;
 	}
 	if (msg == MSG_ERROR) {
 		snprintf(last_error, sizeof last_error,
@@ -182,11 +236,12 @@ info_delete(const char *key)
 int
 info_exists(const char *key)
 {
+	if (waitret_init() == -1)
+		return -1;
 	if (info_open(NULL) == -1)
 		return -1;
 	if (proto_output(proto, CMD_READ, "%s", key) == -1)
 		goto fail;
-	waitret_init();
 	waitret.exists_key = key;
 	if (wait_until(MSG_EOF) <= 0)
 		goto fail;
@@ -201,6 +256,8 @@ info_readv(struct info_bind *binds, char *buffer, unsigned int buffersz)
 {
 	const struct info_bind *b;
 
+	if (waitret_init() == -1)
+		return -1;
 	if (info_open(NULL) == -1)
 		return -1;
 	if (proto_output(proto, CMD_BEGIN, "") == -1)
@@ -212,7 +269,6 @@ info_readv(struct info_bind *binds, char *buffer, unsigned int buffersz)
 		goto fail;
 	if (proto_output(proto, CMD_COMMIT, "") == -1)
 		goto fail;
-	waitret_init();
 	waitret.binds = binds;
 	waitret.buffer = buffer;
 	waitret.buffersz = buffersz;
@@ -229,6 +285,8 @@ info_writev(const struct info_bind *binds)
 {
 	const struct info_bind *b;
 
+	if (waitret_init() == -1)
+		return -1;
 	if (info_open(NULL) == -1)
 		return -1;
 	if (proto_output(proto, CMD_BEGIN, "") == -1)
@@ -247,7 +305,6 @@ info_writev(const struct info_bind *binds)
 		goto fail;
 	if (proto_output(proto, CMD_COMMIT, "") == -1)
 		goto fail;
-	waitret_init();
 	if (wait_until(MSG_PONG) <= 0)
 		goto fail;
 	return 0;
@@ -260,7 +317,7 @@ int
 info_tx_begin()
 {
 	if (tx_begun) {
-		errno = EIO;
+		errno = EIO;	/* already in a transaction */
 		return -1;
 	}
 	if (info_open(NULL) == -1)
@@ -277,7 +334,7 @@ int
 info_tx_read(const char *key)
 {
 	if (!tx_begun) {
-		errno = EIO;
+		errno = EIO;	/* not in a transaction */
 		return -1;
 	}
 	if (proto_output(proto, CMD_READ, "%s", key) == -1)
@@ -292,7 +349,7 @@ int
 info_tx_write(const char *key, const char *value, unsigned int valuesz)
 {
 	if (!tx_begun) {
-		errno = EIO;
+		errno = EIO;	/* not in a transaction */
 		return -1;
 	}
 	if (proto_output(proto, CMD_WRITE, "%s%c%*s",
@@ -308,7 +365,7 @@ int
 info_tx_delete(const char *key)
 {
 	if (!tx_begun) {
-		errno = EIO;
+		errno = EIO;	/* not in a transaction */
 		return -1;
 	}
 	if (proto_output(proto, CMD_WRITE, "%s", key) == -1)
@@ -323,7 +380,7 @@ int
 info_tx_sub(const char *pattern)
 {
 	if (!tx_begun) {
-		errno = EIO;
+		errno = EIO;	/* not in a transaction */
 		return -1;
 	}
 	if (proto_output(proto, CMD_SUB, "%s", pattern) == -1)
@@ -338,15 +395,16 @@ int
 info_tx_commit(int (*cb)(const char *key, const char *value, unsigned int sz))
 {
 	if (!tx_begun) {
-		errno = EIO;
+		errno = EIO;	/* not in a transaction */
 		return -1;
 	}
+	if (waitret_init() == -1)
+		return -1;
 	if (proto_output(proto, CMD_PING, "") == -1)
 		goto fail;
 	if (proto_output(proto, CMD_COMMIT, "") == -1)
 		goto fail;
 	tx_begun = 0;
-	waitret_init();
 	waitret.info_cb = cb;
 	if (wait_until(MSG_PONG) <= 0)
 		goto fail;
@@ -361,9 +419,10 @@ info_sub_wait(int (*cb)(const char *key, const char *value, unsigned int sz))
 {
 	int ret;
 
+	if (waitret_init() == -1)
+		return -1;
 	if (info_open(NULL) == -1)
 		return -1;
-	waitret_init();
 	waitret.info_cb = cb;
 	ret = wait_until(MSG_EOF);
 	if (ret == -1)
@@ -455,6 +514,9 @@ info_open(const char *hostport)
 	if (fd != -1 && proto)
 		return 0;
 
+	if (waitret_init() == -1)
+		return -1;
+
 	info_close();
 	for (retry = 0; retry < info_retries; retry++) {
 		if (try_connect(hostport, &mode) == 0)
@@ -470,7 +532,6 @@ info_open(const char *hostport)
 		return -1;
 	}
 
-	waitret_init();
 	tx_begun = 1;
 
 	proto_set_mode(proto, mode);
