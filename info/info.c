@@ -8,7 +8,7 @@
 
 static const char usage_options[] =
 #ifdef SMALL
-	"[-b] [-k[delim]] [-t secs] "
+	"[-ACb] [-k[delim]] [-t secs] "
 	"{[-r] key | -w key=value | -d key | -s pattern}...\n"
 #else
 	"[opts] {[-r] key | -w key=value | -d key | -s pattern}...\n"
@@ -19,13 +19,17 @@ static const char usage_options[] =
 	"  -k[delim] print key name when reading/subscribing\n"
 	"  -S h:p    connect to TCP host:port\n"
 	"  -t secs   timeout a subscription\n"
+	"  -A        print all keys (-k= -t0 -s*)\n"
+	"  -C        clear all keys\n"
 #endif
 	;
 
 static struct {
 	const char *key_delim;	/* -k[delim] */
 	int timeout;
-	int blank;
+	unsigned int blank : 1;		/* -b print deleted as blank */
+	unsigned int all : 1;		/* -A print all */
+	unsigned int clear : 1;		/* -C clear all */
 #ifndef SMALL
 	const char *socket;	/* -S */
 #endif
@@ -36,8 +40,13 @@ static unsigned int deleted_count;
 static int print_cb_flush;
 
 static int
-print_cb(const char *key, const char *value, unsigned int sz)
+action_cb(const char *key, const char *value, unsigned int sz)
 {
+	if (options.clear && value) {
+		if (info_delete_nowait(key) == -1)
+			perror("info_delete_nowait");
+		return 1;
+	}
 	if (!value) {
 		deleted_count++;
 		if (!options.blank)
@@ -93,6 +102,16 @@ main(int argc, char *argv[])
 			continue;
 		}
 #endif
+		if (strcmp(opt, "-A") == 0) {
+			options.all = 1;
+			optind++;
+			continue;
+		}
+		if (strcmp(opt, "-C") == 0) {
+			options.clear = 1;
+			optind++;
+			continue;
+		}
 		if (strcmp(opt, "-b") == 0) {
 			options.blank = 1;
 			optind++;
@@ -124,7 +143,7 @@ main(int argc, char *argv[])
 			continue;	/* assume implied -r or -w */
 		if (!strchr("rwds", opt[1])) {
 #ifndef SMALL
-			if (strchr("bkt", opt[1]))
+			if (strchr("ACbkt", opt[1]))
 				fprintf(stderr, "-%c specified too late\n",
 					opt[1]);
 #endif
@@ -165,6 +184,21 @@ main(int argc, char *argv[])
 	/* Start the transaction */
 	if (info_tx_begin() == -1)
 		goto fail;
+
+	if (options.all) {
+		/* -A print all keys */
+		if (!options.key_delim)
+			options.key_delim = "=";
+	}
+	if (options.all || options.clear) {
+		/* -A and -C subscribe to * with timeout=0 */
+		if (info_tx_sub("*") == -1)
+			goto fail;
+		have_subs = 1;
+		if (options.timeout == -1)
+			options.timeout = 0;
+	}
+
 	for (i = optind; !error && i < argc; i++) {
 		char *opt = argv[i];
 		char *data = NULL;
@@ -204,7 +238,10 @@ main(int argc, char *argv[])
 		fprintf(stderr, "%s: timeout only applies to subscriptions\n",
 			argv[0]);
 
-	if (info_tx_commit(print_cb) == -1)
+	/* Complete the transaction. All -r/w/d/s will be performed
+	 * in sequence and transactionally on the server. All immediate
+	 * results from those commands will be handled by action_cb. */
+	if (info_tx_commit(action_cb) == -1)
 		goto fail;
 
 	if (have_subs && options.timeout != 0) {
@@ -219,7 +256,7 @@ main(int argc, char *argv[])
 			}
 			alarm(options.timeout);
 		}
-		if (info_sub_wait(print_cb) == -1)
+		if (info_sub_wait(action_cb) == -1)
 			goto fail;
 	}
 	exit(deleted_count);

@@ -17,6 +17,8 @@
 .Fl d Ar key |
 .Fl s Ar pattern
 .Oc Ns \&...
+.br
+.Op Fl A | Fl C
 .Sh DESCRIPTION
 .Nm info
 is the client tool for the
@@ -71,6 +73,15 @@ will initially print all current keys matching the subscriptions.
 Then it will wait (up to the timeout),
 receiving and printing key values as they change.
 .Po See Sx PATTERNS . Pc
+.El
+Two further command are provided for convenience:
+.Bl -tag -offset indent
+.It Fl A
+Prints the value of every key.
+This is exactly the same as
+.D1 -k= -t 0 -s *
+.It Fl C
+Clear the database by subscribing to then deleting every key.
 .El
 .Ss CONNECTING
 The
