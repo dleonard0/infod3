@@ -161,7 +161,7 @@ proto_recv(struct proto *p, const void *netv, unsigned int netlen)
 	if (netlen == 0) {
 		/* Handle a close message */
 		if (p->on_input)
-			p->on_input(p, MSG_EOF, NULL, 0);
+			(void) p->on_input(p, MSG_EOF, NULL, 0);
 		return 0;
 	}
 
