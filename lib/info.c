@@ -1,3 +1,11 @@
+
+/*
+ * A simple C API for info client applications.
+ *    - global state (not thread safe)
+ *    - automatic connection to the server
+ *    - simple synchronous operations by default
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,17 +22,18 @@
 #include "socktcp.h"
 #include "sockunix.h"
 
-static int fd = -1;
+static int fd = -1;			/* connection to server */
 static char last_error[1024];
 static struct proto *proto;
 static int tx_begun;
 
 unsigned int info_retries = 100;
 
+/* a wait-until descriptor */
 static struct {
-	unsigned char until_msg;	/* on arrival, increments done */
-	int in_cb;			/* true while inside callback */
-	int done;			/* true when until_msg received */
+	unsigned char until_msg;	/* rxing this msg increments .done */
+	int in_cb;			/* true while inside .info_cb() */
+	int done;			/* inc'd when .until_msg received */
 	struct info_bind *binds;
 	const char *exists_key;
 	int exists_ret;
@@ -35,50 +44,40 @@ static struct {
 		unsigned int sz);
 } waitret;
 
-int
-info_read_nowait(const char *key)
+/* Operations that are constrained to callbacks */
+static int
+cb_op(unsigned int msg, const char *arg)
 {
-	if (info_open(NULL) == -1)
+#if 0 /* Do not enforce just yet */
+	if (!waitret.in_cb) {
+		errno = EINVAL;
 		return -1;
-	return proto_output(proto, CMD_READ, "%s", key);
+	}
+#endif
+	return proto_output(proto, msg, "%s", arg);
 }
 
 int
-info_write_nowait(const char *key, const char *value, unsigned int valuesz)
+info_cb_read(const char *key)
 {
-	if (info_open(NULL) == -1)
-		return -1;
-	return proto_output(proto, CMD_WRITE, "%s%c%*s",
-	    key, 0, valuesz, value);
+	return cb_op(CMD_READ, key);
 }
 
 int
-info_delete_nowait(const char *key)
+info_cb_sub(const char *pattern)
 {
-	if (info_open(NULL) == -1)
-		return -1;
-	return proto_output(proto, CMD_WRITE, "%s", key);
+	return cb_op(CMD_SUB, pattern);
 }
 
 int
-info_sub_nowait(const char *pattern)
+info_cb_unsub(const char *pattern)
 {
-	if (info_open(NULL) == -1)
-		return -1;
-	return proto_output(proto, CMD_SUB, "%s", pattern);
+	return cb_op(CMD_UNSUB, pattern);
 }
 
-int
-info_unsub_nowait(const char *pattern)
-{
-	if (info_open(NULL) == -1)
-		return -1;
-	return proto_output(proto, CMD_UNSUB, "%s", pattern);
-}
-
-/* Initialize the waitret status.
- * Return -1 (EBUSY) if the waitret's callback is active.
- * (That means a recursive response wait was attempted) */
+/* Initializes the waitret status.
+ * Returns -1 (EBUSY) if the waitret's callback is active,
+ * which means reentrant use of waitret was attempted */
 static int
 waitret_init()
 {
@@ -91,10 +90,10 @@ waitret_init()
 }
 
 /* Fills in a variable binding using the keyvalue from data[],
- * and allocating storage from waitret.buffer.
+ * and allocates storage from waitret.buffer.
  * Returns -1 on ENOMEM, 0 on success. */
 static int
-waitret_info(struct info_bind *b, const char *data, unsigned int datalen)
+waitret_bind(struct info_bind *b, const char *data, unsigned int datalen)
 {
 	int valuesz;
 	int keylen = strlen(data);
@@ -119,10 +118,12 @@ waitret_info(struct info_bind *b, const char *data, unsigned int datalen)
 	return 0;
 }
 
-/* This procedure is indirectly called from wait_until_done().
- * It handles each received message according to the settings in waitret. */
+/* This procedure is indirectly called from wait_until().
+ * It handles each received message according to the settings
+ * in the global waitret. Its main job is to set waitret.done
+ * when it receives a message with code equal to waitret.until_msg. */
 static int
-wait_on_input(struct proto *p, unsigned char msg,
+on_input(struct proto *p, unsigned char msg,
 	const char *data, unsigned int datalen)
 {
 	if (waitret.until_msg == msg)
@@ -132,25 +133,28 @@ wait_on_input(struct proto *p, unsigned char msg,
 	if (msg == MSG_INFO && waitret.exists_key &&
 	    strcmp(waitret.exists_key, data) == 0)
 	{
-		/* info_exists() */
+		/* called from info_exists() */
 		waitret.exists_ret = (strlen(waitret.exists_key) != datalen);
 		waitret.done++;
 	}
 	if (msg == MSG_INFO && waitret.binds) {
-		/* info_readv() */
+		/* called from info_readv() */
 		struct info_bind *b;
 		for (b = waitret.binds; b->key; b++) {
 			if (strcmp(data, b->key) == 0) {
-				if (waitret_info(b, data, datalen) == -1)
+				if (waitret_bind(b, data, datalen) == -1)
 					return -1;
 				break;
 			}
 		}
 	}
 	if (msg == MSG_INFO && waitret.info_cb) {
+		/* called from info_tx_commit() / info_sub_wait() */
 		int keylen = strlen(data);
 		unsigned int valuesz;
 		const char *value;
+		int cb_ret = 0;
+		/* Prepare the INFO message for info_cb() */
 		if (keylen == datalen) {
 			value = NULL;
 			valuesz = 0;
@@ -159,13 +163,19 @@ wait_on_input(struct proto *p, unsigned char msg,
 			valuesz = datalen - (keylen + 1);
 		}
 		waitret.in_cb = 1;
-		if (waitret.info_cb(data, value, valuesz) == 0) {
-			if (waitret.until_msg == MSG_EOF)
-				waitret.done++;
-		}
+		cb_ret = waitret.info_cb(data, value, valuesz);
 		waitret.in_cb = 0;
+		if (cb_ret == 0 && waitret.until_msg == MSG_EOF) {
+			/* The callback function for info_sub_wait()
+			 * returned 0, which we'll interpret to mean
+			 * "that's enough". */
+			waitret.done++;
+		}
+		if (cb_ret == -1)
+			return -1;
 	}
 	if (msg == MSG_ERROR) {
+		/* Network protocol error */
 		snprintf(last_error, sizeof last_error,
 			"(server) %.*s", datalen, data);
 		return 0;
@@ -173,9 +183,10 @@ wait_on_input(struct proto *p, unsigned char msg,
 	return 1;
 }
 
-/* Receive messages until the conditions within waitret are satisfied,
- * or a connection error occurs.
- * Returns 0 on MSG_ERROR, -1 on errno, or 1 on success. */
+/* Receive messages until waitret.done is set by on_input(),
+ * or until a connection error occurs.
+ * Returns -1 on errno,
+ * Returns 1+ on success. */
 static int
 wait_until(unsigned char msg)
 {
@@ -189,7 +200,7 @@ wait_until(unsigned char msg)
 		if (len == 0) {
 			snprintf(last_error, sizeof last_error,
 				"connection closed by server");
-			return 0;
+			goto eof;
 		}
 		if (len == -1) {
 			snprintf(last_error, sizeof last_error,
@@ -198,10 +209,16 @@ wait_until(unsigned char msg)
 		}
 		buf[len] = '\0';
 		len = proto_recv(proto, buf, len);
-		if (len <= 0)
+		if (len == 0)
+			goto eof;
+		if (len < 0)
 			return len;
 	}
 	return waitret.done;
+eof:
+	/* Convert early EOF into some semblance of an error */
+	errno = EPIPE;
+	return -1;
 }
 
 int
@@ -243,7 +260,7 @@ info_exists(const char *key)
 	if (proto_output(proto, CMD_READ, "%s", key) == -1)
 		goto fail;
 	waitret.exists_key = key;
-	if (wait_until(MSG_EOF) <= 0)
+	if (wait_until(MSG_EOF) == -1)
 		goto fail;
 	return waitret.exists_ret;
 fail:
@@ -258,22 +275,36 @@ info_readv(struct info_bind *binds, char *buffer, unsigned int buffersz)
 
 	if (waitret_init() == -1)
 		return -1;
+	if (!binds[0].key)
+		return 0;	/* nothing to read */
 	if (info_open(NULL) == -1)
 		return -1;
-	if (proto_output(proto, CMD_BEGIN, "") == -1)
-		goto fail;
-	for (b = binds; b->key; b++)
-		if (proto_output(proto, CMD_READ, "%s", b->key) == -1)
+	if (!binds[1].key) {
+		/* Just one key */
+		if (proto_output(proto, CMD_READ, "%s", binds[0].key) == -1)
 			goto fail;
-	if (proto_output(proto, CMD_PING, "") == -1)
-		goto fail;
-	if (proto_output(proto, CMD_COMMIT, "") == -1)
-		goto fail;
-	waitret.binds = binds;
-	waitret.buffer = buffer;
-	waitret.buffersz = buffersz;
-	if (wait_until(MSG_PONG) <= 0)
-		goto fail;
+		waitret.binds = binds;
+		waitret.buffer = buffer;
+		waitret.buffersz = buffersz;
+		if (wait_until(MSG_INFO) == -1)
+			goto fail;
+	} else {
+		/* Multiple keys use a transaction */
+		if (proto_output(proto, CMD_BEGIN, "") == -1)
+			goto fail;
+		for (b = binds; b->key; b++)
+			if (proto_output(proto, CMD_READ, "%s", b->key) == -1)
+				goto fail;
+		if (proto_output(proto, CMD_PING, "") == -1)
+			goto fail;
+		if (proto_output(proto, CMD_COMMIT, "") == -1)
+			goto fail;
+		waitret.binds = binds;
+		waitret.buffer = buffer;
+		waitret.buffersz = buffersz;
+		if (wait_until(MSG_PONG) == -1)
+			goto fail;
+	}
 	return 0;
 fail:
 	info_close();
@@ -284,29 +315,32 @@ int
 info_writev(const struct info_bind *binds)
 {
 	const struct info_bind *b;
+	int multi;
 
-	if (waitret_init() == -1)
-		return -1;
+	if (!binds[0].key)
+		return 0;	/* nothing to write */
 	if (info_open(NULL) == -1)
 		return -1;
-	if (proto_output(proto, CMD_BEGIN, "") == -1)
-		goto fail;
+	multi = (binds[1].key != NULL);
+	if (multi) {
+		if (proto_output(proto, CMD_BEGIN, "") == -1)
+			goto fail;
+	}
 	for (b = binds; b->key; b++) {
 		if (b->value) {
 			if (proto_output(proto, CMD_WRITE, "%s%c%*s",
 			    b->key, 0, b->valuesz, b->value) == -1)
 				goto fail;
 		} else {
-			if (proto_output(proto, CMD_WRITE, "%s", b->key) == -1)
+			if (proto_output(proto, CMD_WRITE, "%s",
+			    b->key) == -1)
 				goto fail;
 		}
 	}
-	if (proto_output(proto, CMD_PING, "") == -1)
-		goto fail;
-	if (proto_output(proto, CMD_COMMIT, "") == -1)
-		goto fail;
-	if (wait_until(MSG_PONG) <= 0)
-		goto fail;
+	if (multi) {
+		if (proto_output(proto, CMD_COMMIT, "") == -1)
+			goto fail;
+	}
 	return 0;
 fail:
 	info_close();
@@ -324,6 +358,7 @@ info_tx_begin()
 		return -1;
 	if (proto_output(proto, CMD_BEGIN, "") == -1)
 		goto fail;
+	tx_begun = 1;
 	return 0;
 fail:
 	info_close();
@@ -392,8 +427,25 @@ fail:
 }
 
 int
+info_tx_unsub(const char *pattern)
+{
+	if (!tx_begun) {
+		errno = EIO;	/* not in a transaction */
+		return -1;
+	}
+	if (proto_output(proto, CMD_UNSUB, "%s", pattern) == -1)
+		goto fail;
+	return 0;
+fail:
+	info_close();
+	return -1;
+}
+
+int
 info_tx_commit(int (*cb)(const char *key, const char *value, unsigned int sz))
 {
+	int ret;
+
 	if (!tx_begun) {
 		errno = EIO;	/* not in a transaction */
 		return -1;
@@ -406,9 +458,10 @@ info_tx_commit(int (*cb)(const char *key, const char *value, unsigned int sz))
 		goto fail;
 	tx_begun = 0;
 	waitret.info_cb = cb;
-	if (wait_until(MSG_PONG) <= 0)
+	ret = wait_until(MSG_PONG);
+	if (ret == -1)
 		goto fail;
-	return 0;
+	return ret;
 fail:
 	info_close();
 	return -1;
@@ -477,8 +530,9 @@ open_tcp(const char *hostport)
 }
 
 static int
-info_on_sendv(struct proto *p, const struct iovec *iovs, int niovs)
+on_sendv(struct proto *p, const struct iovec *iovs, int niovs)
 {
+	/* Connect the send path directly to the fd */
 	return writev(fd, iovs, niovs);
 }
 
@@ -532,11 +586,9 @@ info_open(const char *hostport)
 		return -1;
 	}
 
-	tx_begun = 1;
-
 	proto_set_mode(proto, mode);
-	proto_set_on_input(proto, wait_on_input);
-	proto_set_on_sendv(proto, info_on_sendv);
+	proto_set_on_input(proto, on_input);
+	proto_set_on_sendv(proto, on_sendv);
 	/* send HELLO? */
 	return 0;
 }
@@ -556,7 +608,7 @@ info_close()
 }
 
 void
-info_shutdown()
+info_cb_close()
 {
 	if (fd != -1)
 		shutdown(fd, SHUT_RD);

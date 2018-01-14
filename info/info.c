@@ -43,8 +43,8 @@ static int
 action_cb(const char *key, const char *value, unsigned int sz)
 {
 	if (options.clear && value) {
-		if (info_delete_nowait(key) == -1)
-			perror("info_delete_nowait");
+		if (info_delete(key) == -1)
+			perror("info_delete");
 		return 1;
 	}
 	if (!value) {
@@ -65,7 +65,7 @@ action_cb(const char *key, const char *value, unsigned int sz)
 static void
 on_alarm(int sig)
 {
-	info_shutdown();
+	info_cb_close();
 }
 
 int

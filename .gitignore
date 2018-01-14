@@ -2,6 +2,7 @@
 *.po
 *.a
 *.so
+t-lib-info
 t-list
 t-match
 t-proto

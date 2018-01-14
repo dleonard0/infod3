@@ -23,6 +23,12 @@ t-server: infod/t-server.o infod/server.o
 TESTS += t-list
 t-list: infod/t-list.o
 	$(LINK.c) $(OUTPUT_OPTION) $^
+TESTS += t-lib-info
+t-lib-info: lib/t-info.o lib/info.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
+TESTS += t-info
+t-info: t-info.sh info/info infod/infod
+	install -m 755 t-info.sh $@
 check: $(TESTS:%=%.checked)
 %.checked: %
 	$(RUNTEST) $(<D)/$(<F)
