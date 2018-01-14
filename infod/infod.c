@@ -1,7 +1,7 @@
 /*
- * Infod3 server
- *  - serves a key-value set
- *  - informes subscribed clients of key updates
+ * A low-memory key-value server.
+ * Clients may subscribe to changes.
+ * Client transactions permit coherent views.
  */
 
 #include <stdlib.h>
@@ -27,46 +27,47 @@
 #include "match.h"
 #include "list.h"
 
-#define MAX_SUBS	16
-#define MAX_BUFCMDS	32
+#define MAX_SUBS	16		/* Maximum subscriptions per client */
+#define MAX_BUFCMDS	32		/* Maximum cmds in a transaction */
 
 static struct options {
 #ifndef SMALL
-	unsigned char verbose;
+	unsigned char verbose;		/* -v */
 # define VERBOSE options.verbose
-	unsigned char stdin;
-	const char *port;
-#else /* VERBOSE is a constant so that branches can be optimized away */
+	unsigned char stdin;		/* -i */
+	const char *port;		/* -p */
+#else
+/* VERBOSE is a constant so that branches can be optimized away */
 # define VERBOSE 0
 #endif
-	unsigned char syslog;
-	const char *store_path;
+	unsigned char syslog;		/* -s */
+	const char *store_path;		/* -f */
 } options;
 
-/* Single store */
+/* global store */
 static struct store *the_store;
 
 /* pre-framed unix listener */
 static struct listener unix_listener = { "unix", NULL };
 
-/* Client connections */
+/* Client connection record */
 struct client {
 	LINK(struct client);
-	int fd;
-	struct proto *proto;
+	int fd;			/* accepted socket */
+	struct proto *proto;	/* protocol state */
 
 	unsigned int nsubs;
 	unsigned int nbufcmds;
 	unsigned int begins;
 
-	/* A subscription is a pattern for match() */
+	/* Active subscripotions */
 	struct subscription {
 		LINK(struct subscription);
 		unsigned int pattern_len;
-		char pattern[];
+		char pattern[];	/* pattern for match() */
 	} *subs;
 
-	/* A buffered command */
+	/* A buffered command held during unclosed BEGIN */
 	struct bufcmd {
 		LINK(struct bufcmd);
 		unsigned int datalen;
@@ -75,7 +76,7 @@ struct client {
 	} *bufcmds, **bufcmd_tail;
 
 #ifndef SMALL
-	struct listener *listener; /* only for verbose */
+	struct listener *listener; /* only used for verbose logs */
 #endif
 } *all_clients;
 
@@ -202,6 +203,7 @@ client_new(int fd)
 	return client;
 }
 
+/* Find the subscription record for the client, or NULL */
 static struct subscription *
 client_find_subscription(struct client *client, const char *pattern,
 	unsigned int pattern_len)
@@ -214,6 +216,7 @@ client_find_subscription(struct client *client, const char *pattern,
 	return sub;
 }
 
+/* This is called just after a client's fd is closed */
 static void
 on_net_close(struct server *s, void *c, struct listener *l)
 {
@@ -267,15 +270,18 @@ on_net_sendv(struct proto *p, const struct iovec *iovs, int niovs)
 	return writev(client->fd, iovs, niovs);
 }
 
-/* Tests if the data could not be a C string, ie contains a NUL */
+/* Tests if data[] contains NUL; ie could not be a C string */
 static int
 contains_nul(const char *data, unsigned int datalen)
 {
 	return !!memchr(data, '\0', datalen);
 }
 
-/* Handle a message received after CMD_BEGIN.
- * A balanced CMD_COMMIT will re-execute all buffered commands. */
+/* Buffer a message received after CMD_BEGIN.
+ * The message is stored in the bufcmds list attached
+ * to the client record.
+ * Later, the corresponing CMD_COMMIT will trigger
+ * execution of all buffered commands. */
 static int
 buffer_command(struct client *client, unsigned char msg,
 	const char *data, unsigned int datalen)
@@ -350,6 +356,9 @@ log_input_verbose(struct client *client, unsigned char msg,
 }
 #endif
 
+/* This is called when a protocol message has been decoded
+ * from the client. That is, we've received a valid
+ * command message from the client. */
 static int
 on_app_input(struct proto *p, unsigned char msg,
 	const char *data, unsigned int datalen)
@@ -457,8 +466,10 @@ on_app_input(struct proto *p, unsigned char msg,
 }
 
 
-/* The listener has accepted a new fd.
- * Attach a new client context to it */
+/* This is called when the listener socket has accepted a
+ * new connection, and the new connection is being added
+ * to the server's poll list.
+ * Allocate and attach a new client record to it. */
 static void *
 on_net_accept(struct server *s, int fd, struct listener *l)
 {
@@ -493,7 +504,7 @@ on_net_accept(struct server *s, int fd, struct listener *l)
 	return client;
 }
 
-/* basename not always available in libc */
+/* basename() is not always available in libc? */
 #define basename portable_basename
 static const char *
 basename(const char *name)
@@ -585,7 +596,7 @@ add_tcp_listeners(struct server *server)
 }
 #endif /* !SMALL */
 
-static int terminated;
+static int terminated;	/* True when a SIGTERM was received */
 static void
 on_sigterm(int sig)
 {
@@ -692,6 +703,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/* main loop */
 	while ((ret = server_poll(server, -1)) > 0) {
 		if (ret == -1) {
 			if (!(errno == EINTR && terminated))
