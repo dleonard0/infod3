@@ -6,42 +6,53 @@
  *
  * SUMMARY
  *
- * The protocol translator provides two interfaces (proto_recv, proto_output)
- * and is configured with two event callbacks (on_input, on_send).
- *                         ___
- *          => proto_recv |   | => on_input
- *  network               |   |                  application
- *          <= on_send    |___| <= proto_output
+ * The protocol translator (proto) provides two callable interfaces
+ * (proto_recv(), proto_output()) and accepts two event callback
+ * function pointers (on_input, on_send):
+ *                         _______
+ *          proto_recv => |       | => on_input
+ *  network               | proto |                  application
+ *             on_send <= |_______| <= proto_output
  *
- * The protocol auto-selects the network mode (binary or text) from the first
- * send or recv from the network. If a sends happens first, it will prefer
- * to talk binary.
+ * The proto auto-selects the network mode (binary or text) from the first
+ * on_send or proto_recv on the network. If on_send is first, it will prefer
+ * to talk binary. The selected mode is invisible to the application.
  *
  * An application's on_input() callback always recieves a PDU as a <cmd,data[]>
- * pair. The application sends PDUs using a printf-like interface where the
- * first %c format provides the cmd ID, and following %-formats encode
- * the data[].
+ * pair. The application sends PDUs through proto_output() which uses a
+ * printf-like signature: the first %c format provides the cmd ID, and
+ * following %-formats encode the data[].
  *
  * On the network side, the interfaces proto_recv() and on_send() use
  * char[] and iovec[], intended to match up with read() and writev().
  *
+ * The protocol translator generally DOES NOT interpret any messages
+ * it translates. It may interpret the protocol version in a HELLO message
+ * in a future version. Some malformed received network messages will
+ * result in a network protocol error reply.
  *
- * Input/from-net path:
  *
- * (start)                         _____                                  __
- *  -> char[]       ->.           |     | ->  MSG_*, char[]  ->.         |  |
+ * Input/from-net function call chart:
+ *
+ * |                               _____                                  __
+ * `-> char[] frag  ->.           |     | ->  MSG_*, char[]  ->.         |A |
  *                     proto_recv()     |                       on_input()  |
  *  <-  { 1+ ok     <-'           |     | <-  { 1+ ok        <-'         |__|
- *      { 0  ok/close             |_____|     { 0  ok/close
- *      {-1  error/close            \         {-1  error/close
+ *      { 0  ok,close             |_____|     { 0  ok,close
+ *      {-1  error,close            \         {-1  error,close
  *                                   v
  *                               MSG_ERROR (protocol error)
- * Output/to-net path:               |
- *        __                       _/___                                (start)
- *       |  |       .<-  iov[] <- |     |            .<- "%c %*s",MSG_*,... <-
+ * Output/to-net chart:              |
+ *        __                       _/___                                      |
+ *       |N |       .<-  iov[] <- |     |            .<- "%c %*s",MSG_*,... <-'
  *       |  on_sendv()            |     proto_output()
  *       |__|       `-> 0+ ok  -> |     |            `-> 0+ ok              ->
  *                     -1  error  |_____|               -1  error
+ *
+ * Return code convention:
+ *     -1  for unrecoverable error; errno must be set
+ *      0  for successful completion
+ *      1+ for ongoing or partial success (return value > 0)
  *
  */
 struct proto;
@@ -101,13 +112,17 @@ int proto_recv(struct proto *p, const void *net, unsigned int netlen);
  * on_input():
  *  The <msg,data> parameters hold the received message from the network.
  *  MSG_EOF indicates the peer closed the connection, and on_input
- *  should return 0.
+ *  should return 0 in that case.
  *  The data parameter points to a buffer that is at least datalen+1
  *  bytes long, and guarantees that data[datalen]=='\0'.
- *  Return -1 for unrecoverable errors, and set errno.
- *  Return 1 to indicate the message was serviced. It is permissible
- *  for on_input() to call proto_output().
- *  Return 0 to indicate an immediate close. Any pending messages will be lost.
+ *
+ *  The value returned by on_input() generally becomes that returned
+ *  returned by proto_recv().
+ *  Return 0 or -1 to request an immediate protocol shutdown and to drop
+ *  any partially received messages.
+ *  Return -1 to indicate an abnormal errors you indicate by errno (eg ENOMEM).
+ *  Return 1 to indicate the message was serviced and you can service more.
+ *  It is permissible for on_input() to call proto_output().
  */
 void proto_set_on_input(struct proto *p,
 	int (*on_input)(struct proto *p, unsigned char msg,
@@ -150,8 +165,11 @@ struct iovec;
  * on_sendv():
  *  The iovs[] array contains a single PDU for transmission to
  *  the network. It will never be empty.
+ *
  *  Return -1 if there was an error sending the PDU, and set errno.
  *  Return 0+ to indicate success.
+ *  Generally, the return value from on_sendv() becomes the returned
+ *  value from proto_output().
  */
 void proto_set_on_sendv(struct proto *p,
     int (*on_sendv)(struct proto *p, const struct iovec *iovs, int niovs));
