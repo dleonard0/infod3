@@ -20,7 +20,7 @@ init_address(struct sockaddr_un *sun, socklen_t *len_return)
 	memset(sun, 0, sizeof *sun);
 	sun->sun_family = AF_UNIX;
 
-	path = getenv(INFOD_SOCKET);
+	path = getenv("INFOD_SOCKET");
 	if (path && *path) {
 		len = strlen(path);
 		if (len > sizeof sun->sun_path)
