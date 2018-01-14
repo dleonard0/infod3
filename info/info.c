@@ -194,6 +194,9 @@ main(int argc, char *argv[])
 		/* -A and -C subscribe to * with timeout=0 */
 		if (info_tx_sub("*") == -1)
 			goto fail;
+		/* Immediately unsubscribe to prevent delete feedback */
+		if (info_tx_unsub("*") == -1)
+			goto fail;
 		have_subs = 1;
 		if (options.timeout == -1)
 			options.timeout = 0;
