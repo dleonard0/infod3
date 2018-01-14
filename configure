@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Only need to configure when building outside source tree
+if [ ! -e configure ]; then
+	cat >Makefile <<-.
+		SRCDIR=$(dirname $0)
+		include \$(SRCDIR)/Makefile
+.
+	echo "created Makefile"
+fi

@@ -1,11 +1,22 @@
 
-CFLAGS += -ggdb -O0 -Wall
+# The default file that infod will use for storage
+STORE_PATH = /run/infod.store
+prefix = /usr/local
+
+CFLAGS += -ggdb -Os -pedantic -Wall
 CPPFLAGS += -I.
 #CPPFLAGS += -DSMALL              # disables text protocol and help
 
-STORE_PATH = /run/infod.store
+default: prep all check
 
-default: check infod/infod info/info
+all: info/info infod/infod lib/libinfo3.a lib/libinfo3.so
+
+# Allow building from outside source directory
+SRCDIR ?= .
+CPPFLAGS += -I$(SRCDIR)
+VPATH = $(SRCDIR):.
+prep:
+	mkdir -p infod info lib
 
 TESTS += t-store
 t-store: infod/t-store.o infod/store.o
@@ -27,8 +38,8 @@ TESTS += t-lib-info
 t-lib-info: lib/t-info.o lib/info.o
 	$(LINK.c) $(OUTPUT_OPTION) $^
 TESTS += t-info
-t-info: t-info.sh info/info infod/infod
-	install -m 755 t-info.sh $@
+t-info: $(SRCDIR)/t-info.sh info/info infod/infod
+	install -m 755 $(SRCDIR)/t-info.sh $@
 check: $(TESTS:%=%.checked)
 %.checked: %
 	$(RUNTEST) $(<D)/$(<F)
@@ -77,16 +88,22 @@ clean:
 	rm -f storepath.h
 
 INSTALL = install -D
-prefix = /usr/local
 bindir = $(prefix)/bin
 sbindir = $(prefix)/sbin
 libdir = $(prefix)/lib
 incdir = $(prefix)/include
 mandir = $(prefix)/man
+
+INSTALL_DATA = $(INSTALL) -m 644
+INSTALL_BIN  = $(INSTALL) -m 755
+
 install:
-	$(INSTALL) -t $(DESTDIR)$(incdir) lib/info.h
-	$(INSTALL) -s -t $(DESTDIR)$(libdir) lib/libinfo3.so
-	$(INSTALL) -s -t $(DESTDIR)$(sbindir) infod/infod
-	$(INSTALL) -s -t $(DESTDIR)$(bindir) info/info
-	$(INSTALL) info/info.mdoc $(DESTDIR)$(mandir)/man1/info.1
-	$(INSTALL) infod/infod.mdoc $(DESTDIR)$(mandir)/man8/infod.8
+	$(INSTALL_DATA) -t $(DESTDIR)$(incdir) $(SRCDIR)/lib/info.h
+	$(INSTALL_DATA) -s -t $(DESTDIR)$(libdir) lib/libinfo3.so
+	-$(INSTALL_DATA) -s -t $(DESTDIR)$(libdir) lib/libinfo3.a
+	$(INSTALL_BIN) -s -t $(DESTDIR)$(sbindir) infod/infod
+	$(INSTALL_BIN) -s -t $(DESTDIR)$(bindir) info/info
+	$(INSTALL_DATA) $(SRCDIR)/info/info.mdoc \
+				$(DESTDIR)$(mandir)/man1/info.1
+	$(INSTALL_DATA) $(SRCDIR)/infod/infod.mdoc \
+				$(DESTDIR)$(mandir)/man8/infod.8
