@@ -715,7 +715,8 @@ main(int argc, char *argv[])
 	if (ret == 0 && VERBOSE)
 		on_net_error(server, "no listeners!");
 
-	log_msg(LOG_ERR, "terminating");
+	if (!terminated || VERBOSE)
+		log_msg(LOG_ERR, "terminating");
 	server_free(server);
 	store_close(the_store);
 	exit(terminated);
