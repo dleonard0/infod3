@@ -245,6 +245,12 @@ info_write(const char *key, const char *value, unsigned int valuesz)
 }
 
 int
+info_writes(const char *key, const char *value_str)
+{
+	return info_write(key, value_str, value_str ? strlen(value_str) : 0);
+}
+
+int
 info_delete(const char *key)
 {
 	return info_write(key, NULL, 0);

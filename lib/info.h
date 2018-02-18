@@ -12,6 +12,12 @@ int info_read(const char *key, char *buf, unsigned int bufsz);
  * Returns -1 on error. */
 int info_write(const char *key, const char *value, unsigned int valuesz);
 
+/* Stores a key and a string value.
+ * This is the same as info_write(s, strlen(s)), except that
+ * the argument may be NULL.
+ * Returns -1 on error. */
+int info_writes(const char *key, const char *value_str);
+
 /* Deletes a key.
  * Returns -1 on error. */
 int info_delete(const char *key);

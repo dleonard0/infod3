@@ -475,6 +475,17 @@ main()
 	    CHECK();
 	}
 
+	/* info_writes() is a convenient wrapper */
+	{
+	    expect_proto_output(1, CMD_WRITE, "%s%c%s", "key", 0, "value");
+	    assert(info_writes("key", "value") != -1);
+	    CHECK();
+
+	    expect_proto_output(1, CMD_WRITE, "%s", "key");
+	    assert(info_writes("key", NULL) != -1);
+	    CHECK();
+	}
+
 #define BAD_BUF (char *)1, ~0
 
 	/* You can call info_readv() to get two coherent values,
