@@ -447,7 +447,7 @@ main()
 	    CHECK();
 	}
 
-	/* You call info_read() to get a deleted value,
+	/* You can call info_read() to get a deleted value,
 	 * because it returns 0 */
 	{
 	    char buf[8] = "x";
@@ -506,6 +506,46 @@ main()
 	    expect_proto_output(1, CMD_WRITE, "%s", "key");
 	    assert(info_writes("key", NULL) != -1);
 	    CHECK();
+	}
+
+	/* info_reads() is a convenient wrapper */
+	{
+	    char buf[6] = {'x','x','x','x','x','x'};
+	    const char *ret;
+	    expect_proto_output(1, CMD_READ, "%s", "key");
+	    expect_on_input(1, MSG_INFO, "key\0value");
+	    ret = info_reads("key", buf, sizeof buf);
+	    assert(ret);
+	    assert(buf[5] == '\0');
+	    assert(strcmp(ret, "value") == 0);
+	    CHECK();
+	}
+	/* info_reads() detects deleted keys */
+	{
+	    char buf[8] = "x";
+	    expect_proto_output(1, CMD_READ, "%s", "bad");
+	    expect_on_input(1, MSG_INFO, "bad");
+	    errno = 0;
+	    assert(info_reads("bad", buf, sizeof buf) == NULL);
+	    assert(errno == ENOENT);
+	    assert(buf[0] == 'x');
+	    CHECK();
+	}
+	/* info_reads() detects short buffer.
+	   This exercises on_input()'s ability to detect
+	   a short buffer. */
+	{
+	    char buf[5] = "x";
+	    expect_proto_output(1, CMD_READ, "%s", "key");
+	    expect_on_input(-1, MSG_INFO, "key\0value"); /* ENOMEM */
+	    errno = 0;
+	    assert(info_reads("key", buf, sizeof buf) == NULL);
+	    assert(errno == ENOMEM);
+	    assert(buf[0] == 'x');
+	    CHECK();
+	    /* This kind of error ruins buffer processing, so
+	     * the connection will have been closed. */
+	    assert(mock_socket_was_closed());
 	}
 
 #define BAD_BUF (char *)1, ~0

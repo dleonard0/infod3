@@ -12,6 +12,16 @@ int info_read(const char *key, char *buf, unsigned int bufsz);
  * Returns -1 on error. */
 int info_write(const char *key, const char *value, unsigned int valuesz);
 
+/* Reads the string value of a key from the info server,
+ * NUL-terminating it if it exists.
+ * This function cannot be used from a callback (see info_cb_read).
+ * Returns a pointer to buf after receiving the value and appending NUL.
+ * Returns NULL if the key had been deleted, setting errno to ENOENT.
+ * Returns NULL if the buffer was too small to hold the value,
+ * setting errno to ENOMEM.
+ * Returns NULL on error. */
+char *info_reads(const char *key, char *buf, unsigned int bufsz);
+
 /* Stores a key and a string value.
  * This is the same as info_write(s, strlen(s)), except that
  * the argument may be NULL.

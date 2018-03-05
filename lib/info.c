@@ -245,6 +245,27 @@ info_write(const char *key, const char *value, unsigned int valuesz)
 	return info_writev(bind);
 }
 
+char *
+info_reads(const char *key, char *buf, unsigned int bufsz)
+{
+	int len;
+
+	if (bufsz < 1) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	len = info_read(key, buf, bufsz - 1);
+	if (len < 0)
+		return NULL;
+	if (len == 0) {
+		errno = ENOENT;
+		return NULL;
+	}
+	/* assert(len <= bufsz - 1); */
+	buf[len] = '\0';
+	return buf;
+}
+
 int
 info_writes(const char *key, const char *value_str)
 {
