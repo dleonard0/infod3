@@ -107,3 +107,5 @@ install:
 				$(DESTDIR)$(mandir)/man1/info.1
 	$(INSTALL_DATA) $(SRCDIR)/infod/infod.mdoc \
 				$(DESTDIR)$(mandir)/man8/infod.8
+	$(INSTALL_DATA) $(SRCDIR)/lib/libinfo.mdoc \
+				$(DESTDIR)$(mandir)/man3/libinfo.3

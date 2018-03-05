@@ -1,0 +1,200 @@
+.\" -mdoc
+.Dd Feb 18, 2018
+.Os Linux
+.Dt LIBINFO 3
+.Sh NAME
+.Nm libinfo.a
+.Nd library routines for key-value-notify service
+.Sh SYNOPSIS
+.In libinfo.h
+.Ss SIMPLE USE
+.Ft "char *"
+.Fn info_reads "const char *key" "char *buf" "unsigned int bufsz"
+.Ft int
+.Fn info_writes "const char *key" "const char *strval"
+.Ft int
+.Fn info_delete "const char *key"
+.Ft int
+.Fn info_exists "const char *key"
+.Ss BINARY VALUE USE
+.Ft int
+.Fn info_read "const char *key" "char *buf" "unsigned int bufsz"
+.Ft int
+.Fn info_write "const char *key" "const char *val" "unsigned int valsz"
+.Ss BULK USE
+.Bd -literal
+struct info_bind {
+    const char *key;        /* NULL for sentinel entry */
+    char *value;            /* NULL for delete */
+    unsigned int valuesz;
+}
+.Ed
+.Ft int
+.Fn info_readv "struct info_bind *binds" "char *buf" "unsigned int bufsz"
+.Ft int
+.Fn info_writev "const struct info_bind *binds"
+.Ss TRANSACTIONS
+.Ft int
+.Fn info_tx_begin
+.Ft int
+.Fn info_tx_read "const char *key"
+.Ft int
+.Fn info_tx_write "const char *key" "const char *value" "unsigned int valuesz"
+.Ft int
+.Fn info_tx_delete "const char *key"
+.Ft int
+.Fn info_tx_sub "const char *pattern"
+.Ft int
+.Fn info_tx_unsub "const char *pattern"
+.Ft int
+.Fo info_tx_commit
+.Fa "int (*cb)(const char *k" "const char *v" "unsigned int vs)"
+.Fc
+.Ss NOTIFICATIONS
+.Ft int
+.Fo info_sub_wait
+.Fa "int (*cb)(const char *k" "const char *v" "unsigned int vs)"
+.Fc
+.Ss CALLBACK-SAFE
+.Ft int
+.Fn info_cb_read "const char *key"
+.Ft int
+.Fn info_cb_sub "const char *pattern"
+.Ft int
+.Fn info_cb_unsub "const char *pattern"
+.Ft void
+.Fn info_cb_close
+.Ss LOW LEVEL
+.Ft "const char *"
+.Fn info_get_last_error
+.Ft int
+.Fn info_open "const char *server"
+.Vt extern unsigned int info_retries;
+.Ft void
+.Fn info_close
+.Ft int
+.Fn info_fileno
+.Sh DESCRIPTION
+.Ss INTRODUCTION
+.Nm libinfo
+provides a client C API to the
+.Xr infod 8
+service,
+a locally-shared key-value store.
+.Pp
+This client API can synchronously read and write
+key values and invoke callback functions on
+asynchronous changes in the store.
+.Pp
+.Em Keys
+are NUL-terminated UTF-8 strings,
+while
+.Em values
+are arbitrary binary data.
+Values may be updated or deleted in any order,
+while key names remain fixed once created.
+The combined size of any key with its value is
+limited to 65535 bytes including the key's
+trailing NUL.
+.Ss ERROR HANDLING
+In the event of an error, these library functions
+will either return \-1 or NULL and set
+.Va errno
+to an indicative value.
+.Ss INITIALISATION
+.Nm libinfo
+needs no initialisation.
+The library will connect on demand to the
+.Xr infod 8
+server.
+See
+.Fn info_open
+for details.
+.\" located either by the environment variable
+.\" .Ev INFO_SOCKET
+.\" using or the abstract
+.\" .Xr unix 7
+.\" address
+.\" .Pa \e0INFOD .
+.Ss SIMPLE USE
+.Fn info_writes
+updates the value of
+.Fa key
+with the string
+.Fa strval .
+The trailing NUL is not stored.
+If
+.Fa strval
+is NULL, the key is deleted.
+.Pp
+.Fn info_reads
+reads the last value written to
+.Fa key
+and stores it, NUL-terminated, into buffer
+.Fa buf .
+If the key does not exist or has been deleted,
+.Fn info_reads
+returns NULL and
+sets
+.Va errno
+to
+.Er ENOENT.
+.Pp
+.Fn info_delete
+deletes the
+.Fa key
+from the server.
+.Pp
+.Fn info_exists
+tests if the key has a value stored in it.
+It returns 0 or 1, or \-1 on error.
+.Ss BINARY VALUES
+.Fn info_read
+and
+.Fn info_write
+read and write binary values to keys.
+.Pp
+Because the server and all clients are local,
+host-endian layout of values can be used.
+.Ss BULK USE
+.Fn info_readv
+and
+.Fn info_writev
+are used to access and update values coherently,
+which is to say all-at-once.
+The reads (or writes) are grouped into a transaction
+so that other clients either see the entire update or
+none of the update.
+.Pp
+These functions guarantee that a collection of keys
+are read or written together on the server with no intervening
+operations.
+.Pp
+In the
+info_bind
+structure, a NULL in the
+.Va value
+field indicates the key does not exists, or should be deleted.
+.Ss TRANSACTIONS
+.Ss NOTIFICATIONS
+.Ss CALLBACK-SAFE
+.Ss LOW LEVEL
+.Fn info_get_last_error
+returns the last error message received by the server.
+.Pp
+.Fn info_open
+is automatically called by all other functions to open
+the socket to the server.
+It will always attempt to contact the server
+.Va info_retries
+times before deciding to fail.
+.Pp
+.Fn info_close
+forces the socket to be closed.
+The socket may yet be opened again by
+.Fn info_open
+or any other call.
+.Pp
+.Fn info_fileno
+returns the file descriptor associated with the
+server.
