@@ -240,7 +240,8 @@ record_proto_outputv(struct proto_output_call *c, unsigned char msg,
  * will check that the invocation matches this one. */
 __attribute__((format(printf,5,6)))
 static struct proto_output_call *
-expect_proto_output_(const char *file, int lineno, int retval, unsigned char msg, const char *fmt, ...)
+expect_proto_output_(const char *file, int lineno,
+		int retval, unsigned char msg, const char *fmt, ...)
 {
 	struct proto_output_call *c =
 		&proto_output_calls[expected_proto_output_calls++];
@@ -351,7 +352,8 @@ static unsigned int actual_on_input_calls;
 /* Future expectation that on_input() will return retval after being called
  * with the given arguments via proto_recv() */
 static struct on_input_call *
-expect_on_input_(const char *file, int lineno, int retval, unsigned char msg, const char *data,
+expect_on_input_(const char *file, int lineno,
+		int retval, unsigned char msg, const char *data,
 		unsigned int datalen)
 {
 	struct on_input_call *c = &on_input_call[expected_on_input_calls++];
