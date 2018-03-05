@@ -89,7 +89,7 @@ waitret_init()
 	return 0;
 }
 
-/* Fills in a variable binding using the keyvalue from data[],
+/* Fills in a variable binding using the key\0value from data[],
  * and allocates storage from waitret.buffer.
  * Returns -1 on ENOMEM, 0 on success. */
 static int
@@ -207,6 +207,7 @@ wait_until(unsigned char msg)
 				"read: %s", strerror(errno));
 			return -1;
 		}
+		/* assert(len <= sizeof buf - 1); because of read() */
 		buf[len] = '\0';
 		len = proto_recv(proto, buf, len);
 		if (len == 0)
