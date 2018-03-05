@@ -49,8 +49,11 @@ struct info_bind {
  * array.
  * This function cannot be used in a callback.
  *
- * @a binds    an array of bindings terminated with a NULL key
+ * @a binds    an array of bindings terminated with a NULL key.
+ *             Only the .key fields should be set.
  * @a buffer   the buffer to use for value storage.
+ *             The info_bind .value fields will be set by this
+ *             function to either NULL or to point into the buffer.
  *
  * Returns -1 on error.  */
 int info_readv(struct info_bind *binds, char *buffer, unsigned int buffersz);

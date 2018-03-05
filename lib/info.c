@@ -278,12 +278,17 @@ fail:
 int
 info_readv(struct info_bind *binds, char *buffer, unsigned int buffersz)
 {
-	const struct info_bind *b;
+	struct info_bind *b;
 
-	if (waitret_init() == -1)
-		return -1;
 	if (!binds[0].key)
 		return 0;	/* nothing to read */
+	/* Clear the results */
+	for (b = binds; b->key; b++) {
+		b->value = NULL;
+		b->valuesz = 0;
+	}
+	if (waitret_init() == -1)
+		return -1;
 	if (info_open(NULL) == -1)
 		return -1;
 	if (!binds[1].key) {
