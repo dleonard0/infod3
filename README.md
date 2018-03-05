@@ -11,7 +11,7 @@ for embedded applications.
 
 ## Start the server
 
-    $ infod -v -f /tmp/info.db &
+    $ infod -f /tmp/info.db &
 
 It listens on unix socket `@INFOD` and on TCP port 26931.
 
@@ -46,7 +46,7 @@ Let's send some READ and WRITE command messages:
     WRITE "name" "Fred"
     READ "name"
 
-The server will respond with an INFO notification:
+The server will respond to READ with an INFO notification:
 
     INFO "name" "Fred"
 
@@ -61,7 +61,7 @@ can be dropped by compiling with `-DSMALL`.
 
 ## TCP subscribe-notify
 
-Subscriptions (SUB) are like an ongoing READ.
+Subscription command SUB is an ongoing READ.
 
 Here we show two terminal sessions, side-by-side,
 with blank lines to make the order of responses clear.
@@ -72,9 +72,11 @@ We send a SUB on the left and a WRITE on the right:
                               | WRITE "foo" "bar"
     INFO "foo" "bar"          |
 
-Duplicates are suppressed.
+Duplicates are suppressed. Deletes are visible.
 
                               | WRITE "foo" "bar"
+                              | WRITE "foo"
+    INFO "foo"                |
                               | WRITE "foo" "snort"
     INFO "foo" "snort"        |
 
@@ -83,7 +85,7 @@ which matches exactly one key.
 We could have subscribed to pattern `*` to see every key,
 or to `f*` to see every key starting with 'f'.
 You get the idea.
-It's glob-like with metachars `*` `?` and `\\`.
+It's glob-like with metachars `*` `?` and `\`.
 
 Subscriptions only exist in the client channel.
 They are lost when the connection is closed.
@@ -172,7 +174,8 @@ Subscriptions require a callback function:
     }
 
 The libinfo library is re-entrant but not thread safe.
-For sophisticated clients you may be better off reading the PROTOCOL
+For sophisticated clients you may be better off reading the
+[PROTOCOL](PROTOCOL)
 specification and writing messages directly to the server socket.
 
 ## That's it!
