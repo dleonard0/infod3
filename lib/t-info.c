@@ -66,6 +66,12 @@ mock_socket_is_open()
 	return !mock_socket_was_closed();
 }
 
+/* Queue of bytes to make appear on socket when it is opened */
+static struct {
+	int c[16];
+	unsigned int len;
+} mock_socket_delayed;
+
 /* Schedule byte c to appear next when the library calls
  * read() on the socket.
  * If c is EOF, then schedule an EOF (0-length read) to
@@ -76,6 +82,10 @@ mock_socket_is_open()
 static void
 mock_socket_next_read_returns(int c)
 {
+	if (mock_socket_was_closed()) {
+		mock_socket_delayed.c[mock_socket_delayed.len++] = c;
+		return;
+	}
 	assert(!mock_socket_was_closed());
 	if (c == EOF) {
 		assert(close(mock_socket.fd[1]) != -1);
@@ -92,6 +102,16 @@ sockunix_connect()
 	assert(mock_socket_was_closed());
 	mock_socket_reset();
 	assert(pipe(mock_socket.fd) == 0);
+
+	while (mock_socket_delayed.len) {
+		int *cp = mock_socket_delayed.c;
+		int c = cp[0];
+		int len = --mock_socket_delayed.len;
+		memmove(cp, cp + 1, len * sizeof *cp);
+		assert(!mock_socket_was_closed());
+		mock_socket_next_read_returns(c);
+	}
+
 	return mock_socket.fd[0];
 }
 
