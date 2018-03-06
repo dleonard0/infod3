@@ -109,3 +109,17 @@ install:
 				$(DESTDIR)$(mandir)/man8/infod.8
 	$(INSTALL_DATA) $(SRCDIR)/lib/libinfo.mdoc \
 				$(DESTDIR)$(mandir)/man3/libinfo.3
+
+%.md: %.mdoc
+	man -Tutf8 $< | sed \
+	  -e 's,_\(.\),i\1/i,g' \
+	  -e 's,\(.\)\1,b\1/b,g' \
+	  -e 's,/\([ib]\)\1,,g' \
+	  -e 's,&,\&amp;,g' \
+	  -e 's,<,\&lt;,g' \
+	  -e 's,>,\&gt;,g' \
+	  -e 's,/\([bi]\),</\1>,g' \
+	  -e 's,\([bi]\),<\1>,g' \
+	  -e '1s,^,<pre>,' \
+	  -e '$$s,$$,</pre>,' \
+	  >$@
