@@ -13,12 +13,15 @@ for embedded applications.
 
     $ infod -f /tmp/info.db &
 
-It listens on unix socket `@INFOD` and on TCP port 26931.
+[infod(8)](wiki/infod%288%29)
+listens on unix socket `@INFOD` and on TCP port 26931.
 
 ## Using the CLI tool
 
 Let's store the value *Tim* under the key *name*
-using the `info` CLI tool.
+using the
+[info(1)](wiki/info%281%29)
+CLI tool.
 
     $ info name=Tim
     $ info name
@@ -129,7 +132,9 @@ The CLI tool always uses transactions.
 
 ## From C
 
-A C library is provided to accommodate simple clients.
+A C library
+[libinfo(3)](wiki/libinfo%283%29)
+is provided to accommodate simple clients.
 It needs no initialisation or dependencies.
 
     #include <info.h>
