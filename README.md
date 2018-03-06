@@ -13,14 +13,14 @@ for embedded applications.
 
     $ infod -f /tmp/info.db &
 
-[infod(8)](wiki/infod%288%29)
+[infod(8)](https://github.com/dleonard0/infod3/wiki/infod%288%29)
 listens on unix socket `@INFOD` and on TCP port 26931.
 
 ## Using the CLI tool
 
 Let's store the value *Tim* under the key *name*
 using the
-[info(1)](wiki/info%281%29)
+[info(1)](https://github.com/dleonard0/infod3/wiki/info%281%29)
 CLI tool.
 
     $ info name=Tim
@@ -133,7 +133,7 @@ The CLI tool always uses transactions.
 ## From C
 
 A C library
-[libinfo(3)](wiki/libinfo%283%29)
+[libinfo(3)](https://github.com/dleonard0/infod3/wiki/libinfo%283%29)
 is provided to accommodate simple clients.
 It needs no initialisation or dependencies.
 
