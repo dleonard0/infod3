@@ -7,7 +7,12 @@ infod3 protocol v0
 	changes in the store by key pattern, and receive immediate
 	updates. Coherent updates are supported through transactions.
 
-	A client can send the following commands to the server:
+	Three variants of the protocol are defined.  A required binary
+	form, an optional self-framed binary form and an optional text form.
+
+Overview
+
+	A client may send the following commands to the server:
 
 		HELLO <v><text>
 		SUB <pattern>
@@ -18,39 +23,36 @@ infod3 protocol v0
 		COMMIT
 		PING <id>
 
-	The server can send the following messags to the client:
+	The server may send the following messages to the client:
 
 		VERSION <v><text>
 		INFO <key> [<value>]
 		PONG <id>
 		ERROR <text>
 
-	The client closes the connection at its pleasure.
+	The client MAY close the connection at any time.
 	Most server messages are sent in response to a client command.
-	Error messages can be sent by the server at any time, and
-	the client should retry on network failure.
+	Error messages MAY be sent by the server at any time.
 
-	The size of any key/value entry is limited to 65535 bytes,
+	The size of any key-value pair is limited to 65535 bytes,
 	including the NUL byte separator between the key and value.
-	The keys cannot contain NUL.
-
-	There are three wire encodings of the protocols defined:
-		- text stream (CRLF terminated)
-		- binary stream (tag-length-value layout)
-		- framed binary (same as binary but without length)
+	The key portion MUST NOT contain a NUL byte.
 
 Client Commands
 
-	HELLO <v><text>
+	Command messages sent from the client are described next.
+
+	HELLO <v> <text>
 
 	    The client indicates the protocol version it wishes to talk.
-	    The server will respond with a VERSION message indicating
+	    The server MUST respond with a VERSION message indicating
 	    its capability.
 	    This document describes version 0 of the protocol.
-	    The HELLO also optionally identifies the client to the
+	    A HELLO also optionally identifies the client to the
 	    server in the text portion. A server may log this as an
 	    indication of the client software's state.
-	    If sent at all, HELLO should be the first message sent.
+	    If sent at all, the HELLO command SHOULD be the first sent
+	    message.
 	    A client need not wait for the VERSION response
 	    before sending subsquent commands compatible with version 0.
 
@@ -59,72 +61,75 @@ Client Commands
 
 	    Manages subscriptions in the current client's channel.
 	    Every client connection is associated with a set of active
-	    subscriptions. The patterns are documented in match.h
-	    but are similar to glob(7).
+	    subscriptions. The pattern syntax is documented below.
 
-	    When a new subscription is received, the server will
-	    immediately send INFO messages for every existing matching
-	    key. From then until an matching UNSUB, the server will
-	    asynchronously send INFO messages for matching key's value
-	    changes.
-	    A server may place a limit on the number of subscriptions.
+	    When a new subscription is received, the server MUST
+	    send INFO messages for every existing matching key.
+	    From then on until canceled by a matching UNSUB, the
+	    server MUST send INFO messages to the subscribed client
+	    whenever a matching key's value is changed.
+	    A server MAY place a limit on the number of subscriptions.
 
 	READ <key>
 
-	    The server will respond with an INFO message for the key.
+	    The server MUST respond with an INFO message for the key.
 
 	WRITE <key> [<value>]
 
-	    The server will update the key's value.
-	    Unless a matching subscription is in place, this will
-	    happen silently.
+	    The server MUST update the key's value.
+	    It MUST not respond with an INFO message, unless a
+	    matching subscription is active.
 
 	PING <id>
 
-	    The server will respond with a matching PONG. This
+	    The server MUST respond with a matching PONG. This
 	    can be used for client synchronization.
 
 	BEGIN
 	COMMIT
 
-	    When a BEGIN message is sent to a server, it will
-	    record all subsequent commands up to the next matching
+	    When a BEGIN message is sent to a server, it MUST
+	    begin recording subsequent commands up to the next matching
 	    COMMIT. When the COMMIT is received, all recorded
-	    commands are performed atomically relative to any
-	    other client. This can be used to query multiple
-	    keys coherently.
+	    commands are performed atomically and exclusive to any
+	    other client. This is intended to be allowed to query
+	    multiple keys coherently.
 
-	    A COMMIT without a matching BEGIN is ignored.
+	    A server MUST ignore any COMMIT without a matching BEGIN.
+	    A server MAY place a limit on the number of commands
+	    it can record.
 
 Server messages
 
-	VERSION <v><text>
+	VERSION <v> <text>
 
 	    This is the response to a HELLO command. The server
 	    indicates the highest compatible version number it can
-	    talk. It will be equal to or less than the HELLO's version.
-	    The <text> is optional and indicates the server.
+	    talk. It MUST be equal to or less than the HELLO's version.
+	    The <text> MAY be the empty string, othewise it should
+	    describe the server.
 
 	INFO <key> [<value>]
 
-	    INFO messages are only sent as a result of READ or
-	    SUB commands. If the <value> is absent, the key
-	    has been deleted.
+	    INFO messages MUST only be sent from the server
+	    as a result of READ or SUB commands.
+	    The <value> MUST be absent only when the key does not
+	    exist on the server.
 
 	PONG <id>
 
-	    PONG messages are only sent as a response to PING
+	    A PONG message MUST only be sent in response to a PING
 	    commands.
 
 	ERROR <int> <text>
 
-	    An ERROR message can be sent by the server at any time.
+	    An ERROR message MAY be sent by the server at any time.
 	    The text is for human consumption and a client should
 	    log the message.
-	    The server may close the connection immediately after
-	    sending this message.
+	    The server MAY close the connection immediately after
+	    sending an ERROR message.
 
-	    The integer 0-255 represent an error groups. The error groups
+	    The integer 0-255 represent an error group. The error groups
 	    are currently:
 
 		100	Unknown or malformed message
@@ -133,7 +138,8 @@ Server messages
 		103     Bad command state
 		255	Internal server error
 
-	    A client recieving error 255 MAY retry later.
+	    A client recieving error 255 SHOULD disconnect and retry later.
+	    A client MUST NOT retry on errors 100 through 103.
 
 Patterns
 
@@ -177,17 +183,26 @@ Patterns
 	However, pattern "iface.*" will get both.
 
 	Overlong or invalid UTF-8 characters in either pattern or key text
-	MAY be treated as unmatchable. NULs may not appear in key or pattern.
+	MAY be treated as unmatchable. NULs MUST NOT appear in key or pattern.
 
 Binary form of messages
 
 	Binary messages are of the form
 
-		message-id       1 octet
-		message-length   2 octets, network endian, payload len
-		message-payload  len octets, no padding
+	    +----+------/ /------+
+	    | ID |    payload    |
+	    +----+------/ /------+
 
-	Message IDs and their payloads
+	"Self-framed" binary messages are of the form
+
+	    +----+----+----+------/ /------+
+	    | ID |  length |    payload    |
+	    +----+----+----+------/ /------+
+
+	    The length is in network endian format
+	    and defines the number of bytes in the unpadded payload.
+
+	Message IDs and their payload structure
 
 		0x00 HELLO       <v> <text>
 		0x01 SUB         <pattern>
@@ -203,50 +218,56 @@ Binary form of messages
 		0x82 PONG        <value>
 		0x83 ERROR       <i> <text>
 
+		0x0A <reserved>
+		0x0D <reserved>
+		0x20 <reserved>
+		0x40-0x7E <reserved>
+
 	The <v> version is a single byte. It is 0x00 for this version.
 
-	The READ message must not contain a NUL (0x00 byte) in its <key>.
-	The WRITE and INFO messages must not contain a NUL when the
+	The READ message MUST NOT contain a NUL (0x00 byte) in its <key>.
+	The WRITE and INFO messages MUST NOT contain a NUL when the
 	message indicates a key deletion. This distinguishes key deletion
 	from an empty value.
 
 	Each of <key>, <pattern> and <text> are in UTF-8.
 	Each <value> is binary and need not be interpreted as UTF-8.
 	Keys sent by a client SHOULD be in normalized UTF-8, although the
-	server MUST NOT normalize or correct overlong encodings.
+	server MUST NOT normalize or otherwise correct the key form.
 
-	If a server sends an ERROR message in binary mode, it must
+	If a server sends an ERROR message in binary mode, it MUST
 	immediately close the connection.
 
-	The maxium size of a binary message is 65538 bytes (64kB + 2).
+	The maximum size of the payload is 65535 bytes. This makes the
+	maximum size of a self-framed binary message 65538 bytes.
 
 	A binary client need not send a HELLO message if it
 	is going to use version 0 messages.
 
-	A server should switch to text protocol if the first received byte
-	from a client is one of 0x0A 0x0D 0x20 or 0x40-0x7E.
-	Some message IDs are therefore reserved for this purpose.
+	A server SHOULD switch to text protocol on a stream socket
+	if the first received byte from the client is one of
 
-		0x0A <reserved>
-		0x0D <reserved>
-		0x20 <reserved>
-		0x40-0x7E <reserved>
+		0x0A 0x0D 0x20 or 0x40-0x7E.
+
+	Some message IDs have been reserved for this purpose.
 
 Text form of messages
 
 	The text form of a client channel consists of
-	lines terminated with <cr> or <lf>. Command words sent
-	by the client may be either upper or lowercase,
+	lines terminated with <cr> and/or <lf>. Command words sent
+	by the client MUST be interpreted case insensitively.
 	and redundant space characters <sp> are permitted.
-	Blank lines are ignored.
+	Blank lines MUST be ignored by the server.
 
-	A server must switch to binary mode if it receives
+	A server MUST switch from text to binary mode if it receives
 	an initial binary HELLO message commencing with 0x00.
 
-	The server will always send uppercase
-	and emit minimal space characters <sp>. It will
-	always terminate lines with <cr><lf>. It will
-	never send blank lines consisting of just <cr><lf>.
+	The server MUST always emit command IDs in uppercase
+	and send minimal single space characters <sp>.
+	The server MUST always terminate lines with <cr><lf>.
+	A server MUST NOT send blank lines consisting of just <cr><lf>.
+
+	An abbreviated syntax for the messages and commands follows:
 
 	    <sp>* HELLO [<sp>+ <int> [<sp>+ <text>]] <sp>* <crlf>
 	    <sp>* SUB <sp>+ <pattern> <sp>* <crlf>
@@ -262,23 +283,22 @@ Text form of messages
 	    PONG <sp> [<ident>] <cr> <lf>
 	    ERROR <sp> <int> <sp> <text> <cr> <lf>
 
-	<int> is an unsigned decimal integer smaller than 256. The server
-	will never generated superfluous leading 0s.
+	where <int> is an unsigned decimal integer smaller than 256.
+	The server MUST NOT generate leading 0s except for the value 0.
 	
-	If the client omits the HELLO message, the server must not send
-	a VERSION response. However, the server may assume any version
-	that is compatible with version 0.  A missing <int> in the HELLO
-	message means the same, except elicits a VERSION response.
+	If the client omits the HELLO message, the server MUST NOT send
+	a VERSION response. However, the server MAY then assume any version
+	that is compatible with version 0.
 
     Human clients
 
-	A server may accept the pseudo-command HELP, and reply with
-	any human-oriented response text.
+	A server MAY accept the pseudo-command HELP with the text protocol
+	and SHOULD reply with human-oriented response text.
 
-	The server must also accept a single letter aliases for all
+	A server MUST accept single letter aliases for all
 	commands, except HELLO, namely: s (SUB), u (UNSUB), r (READ),
 	w (WRITE), b (BEGIN), c (COMMIT) and p (PING).
-	Client programs using the text protocol should not abbreviate
+	Client programs using the text protocol SHOULD not abbreviate
 	commands.
 
     String quoting
@@ -286,13 +306,13 @@ Text form of messages
 	<ident>, <pattern>, <key>, <value> and <text> strings are encoded in
 	the following quoting system:
 
-		- If the string has no length, it must be encoded as ""
+		- If the string has no length, it MUST be encoded as ""
 		- If the string contains only UTF-8 characters, excluding
 			<sp> <cr> <lf>
-		  and does not begin with ", then it may be encoded
+		  and does not begin with ", then it MAY be encoded
 		  directly without quoting and without any special meaning
 		  for " or \.
-		- Otherwise the string must be enclosed in " with the
+		- Otherwise the string MUST be enclosed in " with the
 		  following bytes octal escaped as \ooo:
 
 			<lf>	\012
@@ -300,27 +320,32 @@ Text form of messages
 			"	\042
 			\	\134
 
-	The server must accept all quoted \ooo sequences.
-	The server must always generate these five octal sequences
+	The server MUST accept all quoted \ooo octal sequences.
+	The server MUST generate these five octal sequences
 	instead of their unescaped byte form:
 
 		\000 \012 \015 \042 \134
 
-	The server must not accept non-octal escapes. That is, a
-	backslash in a quoted string must be followed by three octal
-	digits.
+	The server MUST NOT accept non-octal escapes. That is, a
+	backslash in a quoted string not followed by three octal
+	digits MUST be rejected by the server using error code 101.
 
-	The server will always quote the strings it sends.
+	The server MUST quote every strings it sends.
 
 	If the server sends an ERROR message in response to a malformed
-	command, it should not close the connection.
+	command, it MAY close the connection.
 
     Maximum line length
 
         In the worst case, a compliant server will emit a line consisting of
-	262155 bytes. This corresponds to:
-	  - the longest word "VERSION" and space (8 bytes)
-	  - two quoted strings of all escapes, totalling 65535 bytes
-	  	(2 + 1 + 2 + 65535*4 bytes)
-	  - the trailing <cr><lf> (2 bytes)
+	262152 bytes. This corresponds to:
+	  - the longest word "VERSION" (7 bytes)
+	  - space (1)
+	  - the number "255" (3)
+	  - space (1)
+	  - a quoted strings of all octal escapes (1 + 65534 * 4 + 1)
+	  - the trailing <cr><lf> (2)
 
+Security
+
+	Identity and access control is not discussed in this document.
