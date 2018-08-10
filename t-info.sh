@@ -6,8 +6,8 @@
 
 
 # Executables being tested
-infod=infod/infod
-info=info/info
+infod=./infod
+info=./info
 
 # newline
 nl="

@@ -1,44 +1,43 @@
 
 # The default file that infod will use for storage
 STORE_PATH = /run/infod.store
-prefix = /usr/local
+
 
 CFLAGS += -ggdb -Os -pedantic -Wall
 CPPFLAGS += -I.
 #CPPFLAGS += -DSMALL              # disables text protocol and help
+ARFLAGS = rvU
 
-default: prep all check
+default: all check
 
-all: info/info infod/infod lib/libinfo3.a lib/libinfo3.so
+all: info infod libinfo3.a libinfo3.so
 
 # Allow building from outside source directory
 SRCDIR ?= .
 CPPFLAGS += -I$(SRCDIR)
 VPATH = $(SRCDIR):.
-prep:
-	mkdir -p infod info lib
 
 TESTS += t-store
-t-store: infod/t-store.o infod/store.o
-	$(LINK.c) $(OUTPUT_OPTION) $^
 TESTS += t-match
-t-match: infod/t-match.o infod/match.o
-	$(LINK.c) $(OUTPUT_OPTION) $^
 TESTS += t-proto
-t-proto: lib/t-proto.o lib/proto.o lib/protofram.o lib/prototext.o \
-	 lib/protobin.o lib/rxbuf.o
-	$(LINK.c) $(OUTPUT_OPTION) $^
 TESTS += t-server
-t-server: infod/t-server.o infod/server.o
-	$(LINK.c) $(OUTPUT_OPTION) $^
 TESTS += t-list
-t-list: infod/t-list.o
-	$(LINK.c) $(OUTPUT_OPTION) $^
 TESTS += t-lib-info
-t-lib-info: lib/t-info.o lib/info.o
-	$(LINK.c) $(OUTPUT_OPTION) $^
 TESTS += t-info
-t-info: $(SRCDIR)/t-info.sh info/info infod/infod
+t-store: daemon-t-store.o daemon-store.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
+t-match: daemon-t-match.o daemon-match.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
+t-proto: lib-t-proto.o lib-proto.o lib-protofram.o lib-prototext.o \
+	 lib-protobin.o lib-rxbuf.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
+t-server: daemon-t-server.o daemon-server.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
+t-list: daemon-t-list.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
+t-lib-info: lib-t-info.o lib-info.o
+	$(LINK.c) $(OUTPUT_OPTION) $^
+t-info: $(SRCDIR)/t-info.sh info infod
 	install -m 755 $(SRCDIR)/t-info.sh $@
 check: $(TESTS:%=%.checked)
 %.checked: %
@@ -46,66 +45,68 @@ check: $(TESTS:%=%.checked)
 .PHONY: check %.checked
 
 
-LIB_OBJS =  lib/proto.o
-LIB_OBJS += lib/protofram.o
-LIB_OBJS += lib/prototext.o
-LIB_OBJS += lib/protobin.o
-LIB_OBJS += lib/rxbuf.o
-LIB_OBJS += lib/sockunix.o
-LIB_OBJS += lib/socktcp.o
-LIB_OBJS += lib/info.o
+LIB_OBJS =  lib-proto.o
+LIB_OBJS += lib-protofram.o
+LIB_OBJS += lib-prototext.o
+LIB_OBJS += lib-protobin.o
+LIB_OBJS += lib-rxbuf.o
+LIB_OBJS += lib-sockunix.o
+LIB_OBJS += lib-socktcp.o
+LIB_OBJS += lib-info.o
 PICFLAGS = -fPIC
-lib/libinfo3.a: lib/libinfo3.a($(LIB_OBJS))
-lib/libinfo3.so: $(LIB_OBJS:.o=.po)
+libinfo3.a: libinfo3.a($(LIB_OBJS))
+libinfo3.so: $(LIB_OBJS:.o=.po)
 	$(LINK.c) $(OUTPUT_OPTION) -shared $^
-%.po: %.c
-	$(COMPILE.c) $(OUTPUT_OPTION) $(PICFLAGS) $<
-LIBS = -Wl,-rpath,'$$ORIGIN/../lib' -Llib -linfo3
+LIBS = -Wl,-rpath,'$$ORIGIN' -L. -linfo3
 
-
-INFOD_OBJS =  infod/infod.o
-INFOD_OBJS += infod/store.o
-INFOD_OBJS += infod/match.o
-INFOD_OBJS += infod/server.o
-infod/infod: $(INFOD_OBJS) lib/libinfo3.so
+INFOD_OBJS =  daemon-infod.o
+INFOD_OBJS += daemon-store.o
+INFOD_OBJS += daemon-match.o
+INFOD_OBJS += daemon-server.o
+infod: $(INFOD_OBJS) libinfo3.so
 	$(LINK.c) $(OUTPUT_OPTION) $(INFOD_OBJS) $(LIBS)
 
-infod/infod.o: infod/infod.c storepath.h
+daemon-infod.o: daemon/infod.c storepath.h
 	$(COMPILE.c) $(OUTPUT_OPTION) $<
 storepath.h: Makefile
 	printf '#define STORE_PATH "%s"\n' "$(STORE_PATH)" >$@
 
-INFO_OBJS = info/info.o
-info/info: $(INFO_OBJS) lib/libinfo3.so
+INFO_OBJS = client-info.o
+info: $(INFO_OBJS) libinfo3.so
 	$(LINK.c) $(OUTPUT_OPTION) $(INFO_OBJS) $(LIBS)
 
+client-%.o: client/%.c;	$(COMPILE.c) $(OUTPUT_OPTION) $<
+lib-%.o: lib/%.c;	$(COMPILE.c) $(OUTPUT_OPTION) $<
+daemon-%.o: daemon/%.c;	$(COMPILE.c) $(OUTPUT_OPTION) $<
+lib-%.po: lib/%.c;	$(COMPILE.c) $(OUTPUT_OPTION) $(PICFLAGS) $<
+
 clean:
-	rm -f lib/*.o lib/*.po
-	rm -f lib/libinfo3.a lib/libinfo3.so
-	rm -f infod/infod infod/*.o
-	rm -f info/info info/*.o
+	rm -f *.o *.po
+	rm -f libinfo3.a libinfo3.so
+	rm -f infod info
 	rm -f $(TESTS)
 	rm -f storepath.h
 
-INSTALL = install -D
-bindir = $(prefix)/bin
-sbindir = $(prefix)/sbin
-libdir = $(prefix)/lib
-incdir = $(prefix)/include
-mandir = $(prefix)/man
+PREFIX = /usr/local
+bindir = $(PREFIX)/bin
+sbindir = $(PREFIX)/sbin
+libdir = $(PREFIX)/lib
+incdir = $(PREFIX)/include
+mandir = $(PREFIX)/man
 
+INSTALL = install -D
 INSTALL_DATA = $(INSTALL) -m 644
 INSTALL_BIN  = $(INSTALL) -m 755
 
 install:
 	$(INSTALL_DATA) -t $(DESTDIR)$(incdir) $(SRCDIR)/lib/info.h
-	$(INSTALL_DATA) -s -t $(DESTDIR)$(libdir) lib/libinfo3.so
-	-$(INSTALL_DATA) -s -t $(DESTDIR)$(libdir) lib/libinfo3.a
-	$(INSTALL_BIN) -s -t $(DESTDIR)$(sbindir) infod/infod
-	$(INSTALL_BIN) -s -t $(DESTDIR)$(bindir) info/info
-	$(INSTALL_DATA) $(SRCDIR)/info/info.mdoc \
+	$(INSTALL_DATA) -s -t $(DESTDIR)$(libdir) libinfo3.so
+	-$(INSTALL_DATA) -s -t $(DESTDIR)$(libdir) libinfo3.a
+	$(INSTALL_BIN) -s -t $(DESTDIR)$(sbindir) infod
+	$(INSTALL_BIN) -s -t $(DESTDIR)$(bindir) info
+	$(INSTALL_DATA) $(SRCDIR)/client/info.mdoc \
 				$(DESTDIR)$(mandir)/man1/info.1
-	$(INSTALL_DATA) $(SRCDIR)/infod/infod.mdoc \
+	$(INSTALL_DATA) $(SRCDIR)/daemon/infod.mdoc \
 				$(DESTDIR)$(mandir)/man8/infod.8
 	$(INSTALL_DATA) $(SRCDIR)/lib/libinfo.mdoc \
 				$(DESTDIR)$(mandir)/man3/libinfo.3

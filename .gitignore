@@ -10,8 +10,8 @@ t-proto
 t-server
 t-store
 storepath.h
-infod/infod
+infod
 infod/__pycache__
-info/info
+info
 .*.swp
 TAGS
