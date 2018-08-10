@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 
 """
-   Stress test the infod store by
-   generating pseudo-random get/put/delete operations.
-   Connects to a running infod instance over AF_UNIX.
+   Developer tool to stress test the infod store code by
+   sending it a large number of pseudo-random get/put/delete
+   operations.
+   This script is a standalone client that connects to a
+   running infod instance via its AF_UNIX socket.
 
-   Usage: stress.y [pause-at]
+   Usage:
+   	./infod -f /tmp/info.store &
+   	stress.py [pause-at]
 
    To use, first run "infod -f /tmp/info.store" in the background.
    Then run this test script and wait for it to complete.
