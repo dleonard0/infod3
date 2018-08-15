@@ -277,6 +277,15 @@ contains_nul(const char *data, unsigned int datalen)
 	return !!memchr(data, '\0', datalen);
 }
 
+/* Tests if data[] contains '!' followed by the first NUL;
+ * That is the key ends with '!'. */
+static int
+is_ephemeral(const char *data, unsigned int datalen)
+{
+	const char *nul = memchr(data, '\0', datalen);
+	return nul && nul > data && nul[-1] == '!';
+}
+
 /* Buffer a message received after CMD_BEGIN.
  * The message is stored in the bufcmds list attached
  * to the client record.
@@ -432,6 +441,8 @@ on_app_input(struct proto *p, unsigned char msg,
 				return proto_output_error(p,
 					PROTO_ERROR_INTERNAL, "del: %s",
 					strerror(errno));
+		} else if (is_ephemeral(data, datalen)) {
+			/* Put key!\0value */
 		} else {
 			/* Put */
 			int ret = store_put(the_store, datalen, data);
