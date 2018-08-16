@@ -459,7 +459,17 @@ on_app_input(struct proto *p, unsigned char msg,
 				if (match(sub->pattern, data))
 					if (proto_output(c->proto, MSG_INFO,
 					    "%*s", datalen, data) == -1)
+					{
+#ifndef SMALL
+						char namebuf[PEERNAMESZ];
+						log_msgf(LOG_ERR,
+						    "[%s] dropped: %m",
+						    listener_peername(
+						    c->listener, c->fd,
+						    namebuf, sizeof namebuf));
+#endif
 						(void)shutdown_read(c->fd);
+					}
 		return 1;
 	case CMD_PING:
 		return proto_output(p, MSG_PONG, "%*s", datalen, data);
