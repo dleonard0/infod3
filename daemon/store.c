@@ -77,9 +77,9 @@
  *      | data            :dd|s'|        after allocation 'dd'
  *      +-----------------+--+--+
  *
- * 2. (dd>s) Repack the data, then and retry.
+ * 2. (dd>s) Repack the data, then retry.
  *
- *    NB: If an entry is being reallocated (sized up), ensure
+ *    NB: If an entry is being reallocated (growing), ensure
  *    that it moves to the end of the (packed) data first, to
  *    anticipate failure due to ENOSPC.
  *
@@ -269,6 +269,18 @@ record_get_size(const union record *record)
 		: info_size(record->info.sz);
 }
 
+/* Sets the space pointer, and writes a sentinel gap */
+static void
+store_set_space(struct store *store, uint32_t space)
+{
+	store->space = space;
+	if (space != store->filesz) {
+		union record *sentinel =
+			(union record *)(store->filebase + space);
+		record_init_gap(sentinel, store->filesz - space);
+	}
+}
+
 /* Convert an info into a gap. Might rewind store->space. */
 static void
 info_make_gap(struct store *store, struct info *info)
@@ -295,7 +307,7 @@ info_make_gap(struct store *store, struct info *info)
 		next_offset = filesz;
 	record_init_gap(record, next_offset - offset);
 	if (next_offset == filesz)
-		store->space = offset;
+		store_set_space(store, offset);
 }
 
 /* Repack the file, and rebuild the sorted index. */
@@ -340,7 +352,7 @@ store_repack(struct store *store)
 	if (space < store->filesz)
 		record_init_gap((union record *)(filebase + space),
 			filesz - space);
-	store->space = space;
+	store_set_space(store, space);
 	store->n = i;
 	qsort(store->index, store->n, sizeof store->index[0], info_compar);
 
@@ -553,7 +565,7 @@ store_file_dealloc(struct store *store, struct info *info)
 	union record *after_record;
 
 	if (after_offset == store->space) {
-		store->space = offset;
+		store_set_space(store, offset);
 		store_file_trim(store);
 	} else {
 		after_record =
@@ -602,7 +614,7 @@ store_info_realloc(struct store *store, unsigned int i, uint16_t new_sz)
 		info->sz = new_sz;
 		if (!after_record) {
 			/* Space grows backwards */
-			store->space = offset + new_alloc;
+			store_set_space(store, offset + new_alloc);
 			store_file_trim(store);
 			return store->index[i]; /* (may have remapped) */
 		} else {
