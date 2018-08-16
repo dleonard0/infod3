@@ -13,7 +13,10 @@
 .Op Fl v
 .Sh DESCRIPTION
 .Nm infod
-is a key-value storage server.
+is a key-value server.
+Keys are UTF-8 strings,
+and values may be any binary string limited in length
+to about 64 kB.
 .Pp
 The options are:
 .Bl -tag -offset indent
@@ -21,18 +24,96 @@ The options are:
 Path to a database file.
 The file will be created if missing or empty.
 .It Fl i
-Accept text protocol commands on standard input.
+Interactive mode.
+Text commands may be entered on standard input.
+(Try typing
+.Ql help )
 .It Fl s
-Use
+Log messages to
 .Xr syslog 3
-for messages, instead of standard error.
+instead of to standard error.
 .It Fl p Ar port
-Listen on TCP
+Listen additionally on TCP
 .Ar port
 for binary and text protocol connections.
+By default
+.Nm infod
+only listens on a well-known
+.Xr unix 7
+socket.
 .It Fl v
-Increase verbosity.
+Increase verbosity in log messages.
 .El
+.Ss OPERATION
+.Nm infod
+listens on the well-known abstract
+.Xr unix 7
+socket
+.Ql \e0INFOD
+and accepts as many simultaneous connections as the
+system will allow.
+.Pp
+The server understands eight request message from clients:
+.Bl -tag -compact -offset 2em -width "HELLO [proto [msg]] "
+.It HELLO Op Ar proto Op Ar msg
+Requests protocol variant
+.It SUB Ar pattern
+Subscribe to changes
+.It UNSUB Ar pattern
+Unsubscribe
+.It READ Ar key
+Read key value
+.It WRITE Ar key Op Ar val
+Write key value
+.It BEGIN
+Start atomic transaction
+.It COMMIT
+End atomic transaction
+.It PING Ar id
+Request PONG reply
+.El
+.Pp
+and replies with four response messages:
+.Bl -tag -compact -offset 2em -width "HELLO [proto [msg]] "
+.It VERSION Ar proto Ar msg
+Server's protocol choice
+.It INFO Ar key Op Ar value
+Key data reply to matching READ or SUB
+.It PONG Ar id
+Reply to matching PING
+.It ERROR Ar int Ar text
+Protocol error
+.El
+.Pp
+These messages are sent over a binary protocol
+or a text variant of the same.
+The unix socket only understands the binary protocol,
+while the TCP protocol detects which
+from the first message.
+.Pp
+Whenever a WRITE is received by the server
+it also sends a matching INFO response to all clients
+with a matching SUB subscription.
+See
+.Xr info 1
+for details on the glob-like subscription pattern.
+.Pp
+When the server receives a BEGIN message it
+starts recording requests until it receives a corresponding COMMIT.
+Then, all the recorded requests are acted on atomically without
+interleaving any other client's request.
+.Pp
+The server does not tolerate slow clients.
+If an outgoing network buffer fills up, the server simply disconnects
+the client.
+.Ss KEY LIMITS
+Keys cannot contain a NUL byte, and should be UTF-8 encoded.
+The total size of a key and its value will not exceed 65534 bytes.
+.Pp
+Keys ending with
+.Ql \&!
+are called ephemeral keys.
+They are never stored and are only made visible to subscribers.
 .Sh SEE ALSO
 .Xr info 1 ,
 .Xr info_open 3
