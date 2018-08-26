@@ -42,7 +42,6 @@ t-info: $(SRCDIR)/t-info.sh info infod
 check: $(TESTS:%=%.checked)
 %.checked: %
 	$(RUNTEST) $(<D)/$(<F)
-.PHONY: check %.checked
 
 
 LIB_OBJS =  lib-proto.o
@@ -86,6 +85,7 @@ clean:
 	rm -f infod info
 	rm -f $(TESTS)
 	rm -f storepath.h
+	rm -f tags
 
 PREFIX = /usr/local
 bindir = $(PREFIX)/bin
@@ -124,3 +124,8 @@ install:
 	  -e '1s,^,<pre>,' \
 	  -e '$$s,$$,</pre>,' \
 	  >$@
+
+tags:
+	ctags $(SRCDIR)/*/*.[ch]
+
+.PHONY: all clean default install tags check %.checked
