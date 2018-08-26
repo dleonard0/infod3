@@ -128,8 +128,10 @@ on_input(struct proto *p, unsigned char msg,
 {
 	if (waitret.until_msg == msg)
 		waitret.done++;
-	if (msg == MSG_EOF)
+	if (msg == MSG_EOF) {
+		snprintf(last_error, sizeof last_error, "Connection closed");
 		return 0;
+	}
 	if (msg == MSG_INFO && waitret.exists_key &&
 	    strcmp(waitret.exists_key, data) == 0)
 	{
@@ -611,6 +613,8 @@ info_open(const char *hostport)
 
 	if (waitret_init() == -1)
 		return -1;
+
+	last_error[0] = '\0';
 
 	info_close();
 	for (retry = 0; retry < info_retries; retry++) {
