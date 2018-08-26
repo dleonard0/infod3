@@ -642,9 +642,13 @@ info_open(const char *hostport)
 	return 0;
 }
 
-void
+int
 info_close()
 {
+	if (waitret.in_cb) {
+		errno = EBUSY;
+		return -1;
+	}
 	if (proto) {
 		proto_free(proto);
 		proto = NULL;
@@ -654,6 +658,7 @@ info_close()
 		fd = -1;
 	}
 	tx_begun = 0;
+	return 0;
 }
 
 void

@@ -83,9 +83,22 @@ int info_open(const char *server);
 /* Limit to the number of retries that info_open() will attempt. */
 extern unsigned int info_retries;
 
-/* Closes the connection opened by info_open().
- * Note that the connection may be automatically reopened. */
-void info_close(void);
+/**
+ * Closes the connection opened by #info_open().
+ *
+ * This function has no effect if the connection has
+ * not yet been opened.
+ *
+ * @retval 0 The connection is closed.
+ * @retval -1 [EBUSY]  Re-entrant use detected from callback.
+ *
+ * @note After being closed, the connection can be
+ * automatically reopened by other functions.
+ *
+ * This function cannot be called from a callback. Please
+ * use #info_cb_close() instead.
+ */
+int info_close(void);
 
 /* Returns the file descriptor used for the server connection.
  * Returns -1 if the connection is closed. */
