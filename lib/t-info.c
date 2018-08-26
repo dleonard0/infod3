@@ -549,6 +549,14 @@ main()
 	     * the connection will have been closed. */
 	    assert(mock_socket_was_closed());
 	}
+	/* info_reads() detects zero-sized buffer. */
+	{
+	    char buf[5] = "x";
+	    errno = 0;
+	    assert(info_reads("key", buf, 0) == NULL);
+	    assert(errno == ENOMEM);
+	    assert(buf[0] == 'x');
+	}
 
 #define BAD_BUF (char *)1, ~0
 

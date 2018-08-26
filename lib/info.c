@@ -255,6 +255,12 @@ info_reads(const char *key, char *buf, unsigned int bufsz)
 	struct info_bind bind[2];
 	char *ret;
 
+	/* Require space in buf for the trailing \0 */
+	if (bufsz == 0) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
 	bind[0].key = key;
 	bind[1].key = NULL;
 	if (info_readv(bind, buf, bufsz - 1) == -1)
