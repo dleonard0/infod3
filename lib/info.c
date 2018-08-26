@@ -517,8 +517,10 @@ info_sub_wait(int (*cb)(const char *key, const char *value, unsigned int sz))
 
 	if (waitret_init() == -1)
 		return -1;
-	if (info_open(NULL) == -1)
+	if (fd == -1 || !proto) {
+		errno = EBADF;
 		return -1;
+	}
 	waitret.info_cb = cb;
 	ret = wait_until(MSG_EOF);
 	if (ret == -1)
