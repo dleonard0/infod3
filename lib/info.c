@@ -248,22 +248,19 @@ info_write(const char *key, const char *value, unsigned int valuesz)
 char *
 info_reads(const char *key, char *buf, unsigned int bufsz)
 {
-	int len;
+	struct info_bind bind[2];
+	char *ret;
 
-	if (bufsz < 1) {
-		errno = ENOMEM;
+	bind[0].key = key;
+	bind[1].key = NULL;
+	if (info_readv(bind, buf, bufsz - 1) == -1)
 		return NULL;
-	}
-	len = info_read(key, buf, bufsz - 1);
-	if (len < 0)
-		return NULL;
-	if (len == 0) {
+	ret = bind[0].value;
+	if (ret)
+		ret[bind[0].valuesz] = '\0';
+	else
 		errno = ENOENT;
-		return NULL;
-	}
-	/* assert(len <= bufsz - 1); */
-	buf[len] = '\0';
-	return buf;
+	return ret;
 }
 
 int
