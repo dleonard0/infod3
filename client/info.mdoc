@@ -151,6 +151,12 @@ will match both.
 .Nm
 will exit 0 only when all operations were successful,
 and no deleted keys were received.
+.Ss ENVIRONMENT
+.Ev INFOD_SOCKET
+specifies a path to the server's
+.Xr unix 7
+socket instead of
+.Ql \e0INFOD .
 .Sh SEE ALSO
 .Xr infod 8 ,
 .Xr info_open 3
