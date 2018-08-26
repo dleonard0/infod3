@@ -118,10 +118,13 @@ waitret_bind(struct info_bind *b, const char *data, unsigned int datalen)
 	return 0;
 }
 
-/* This procedure is indirectly called from wait_until().
+/*
+ * This procedure is indirectly called from wait_until().
  * It handles each received message according to the settings
  * in the global waitret. Its main job is to set waitret.done
- * when it receives a message with code equal to waitret.until_msg. */
+ * when it receives a message with code equal to waitret.until_msg.
+ * If it returns 0, then the caller will close the connection.
+ */
 static int
 on_input(struct proto *p, unsigned char msg,
 	const char *data, unsigned int datalen)
@@ -135,7 +138,8 @@ on_input(struct proto *p, unsigned char msg,
 	if (msg == MSG_INFO && waitret.exists_key &&
 	    strcmp(waitret.exists_key, data) == 0)
 	{
-		/* called from info_exists() */
+		/* called from info_exists()
+		 * If the data is precisely the key, then it is deleted. */
 		waitret.exists_ret = (strlen(waitret.exists_key) != datalen);
 		waitret.done++;
 	}
