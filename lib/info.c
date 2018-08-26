@@ -617,10 +617,12 @@ info_open(const char *hostport)
 	last_error[0] = '\0';
 
 	info_close();
-	for (retry = 0; retry < info_retries; retry++) {
-		if (try_connect(hostport, &mode) == 0)
-			break;
-		sleep(retry);
+	if (try_connect(hostport, &mode) == -1) {
+		for (retry = 0; retry < info_retries; retry++) {
+			(void) sleep(retry);
+			if (try_connect(hostport, &mode) == 0)
+				break;
+		}
 	}
 	if (fd == -1)
 		return -1; /* too many retries */
