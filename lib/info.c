@@ -230,6 +230,10 @@ info_read(const char *key, char *buf, unsigned int bufsz)
 	bind[1].key = NULL;
 	if (info_readv(bind, buf, bufsz) == -1)
 		return -1;
+	if (bind[0].value == NULL) {
+		errno = ENOENT;
+		return -1;
+	}
 	memmove(buf, bind[0].value, bind[0].valuesz);
 	return bind[0].valuesz;
 }
@@ -255,11 +259,12 @@ info_reads(const char *key, char *buf, unsigned int bufsz)
 	bind[1].key = NULL;
 	if (info_readv(bind, buf, bufsz - 1) == -1)
 		return NULL;
-	ret = bind[0].value;
-	if (ret)
-		ret[bind[0].valuesz] = '\0';
-	else
+	if (!bind[0].value) {
 		errno = ENOENT;
+		return NULL;
+	}
+	ret = bind[0].value;
+	ret[bind[0].valuesz] = '\0';
 	return ret;
 }
 

@@ -448,12 +448,14 @@ main()
 	}
 
 	/* You can call info_read() to get a deleted value,
-	 * because it returns 0 */
+	 * because it returns -1 ENOENT */
 	{
 	    char buf[8] = "x";
 	    expect_proto_output(1, CMD_READ, "%s", "key");
 	    expect_on_input(1, MSG_INFO, "key");
-	    assert(info_read("key", buf, sizeof buf) == 0);
+	    errno = 0;
+	    assert(info_read("key", buf, sizeof buf) == -1);
+	    assert(errno == ENOENT);
 	    assert(buf[0] == 'x'); /* unchanged buf */
 	    CHECK();
 	}
