@@ -29,6 +29,8 @@ static int tx_begun;
 
 unsigned int info_retries = 100;
 
+#define ONCE (MSG_EOF - 1)		/* Pseudo-msg for reading once */
+
 /* a wait-until descriptor */
 static struct {
 	unsigned char until_msg;	/* rxing this msg increments .done */
@@ -40,8 +42,7 @@ static struct {
 	char *buffer;
 	int buflen;
 	size_t buffersz;
-	int (*info_cb)(const char *key, const char *value,
-		unsigned int sz);
+	info_cb_fn info_cb;
 } waitret;
 
 /* Operations that are constrained to callbacks */
@@ -155,7 +156,7 @@ on_input(struct proto *p, unsigned char msg,
 		}
 	}
 	if (msg == MSG_INFO && waitret.info_cb) {
-		/* called from info_tx_commit() / info_loop() */
+		/* called from info_tx_commit / _loop / _dispatch() */
 		int keylen = strlen(data);
 		unsigned int valuesz;
 		const char *value;
@@ -189,10 +190,16 @@ on_input(struct proto *p, unsigned char msg,
 	return 1;
 }
 
-/* Receive messages until waitret.done is set by on_input(),
- * or until a connection error occurs.
- * Returns -1 on errno,
- * Returns 1+ on success. */
+/**
+ * Receives messages until @a msg is received, or waitret.done is
+ * set by #on_input() or until a connection error occurs.
+ *
+ * @param msg  The message code to wait for, or #ONCE for 
+ *             a single read, or #MSG_EOF to loop until an error.
+ * @retval -1 Error, see #errno.
+ * @retval  0 A single message was received.
+ * @retval >0 The expected message was received.
+ */
 static int
 wait_until(unsigned char msg)
 {
@@ -201,18 +208,15 @@ wait_until(unsigned char msg)
 
 	waitret.until_msg = msg;
 	waitret.done = 0;
-	while (!waitret.done) {
+	do {
 		len = read(fd, buf, sizeof buf - 1);
 		if (len == 0) {
 			snprintf(last_error, sizeof last_error,
 				"connection closed by server");
 			goto eof;
 		}
-		if (len == -1) {
-			snprintf(last_error, sizeof last_error,
-				"read: %s", strerror(errno));
+		if (len == -1)
 			return -1;
-		}
 		/* assert(len <= sizeof buf - 1); because of read() */
 		buf[len] = '\0';
 		len = proto_recv(proto, buf, len);
@@ -220,7 +224,7 @@ wait_until(unsigned char msg)
 			goto eof;
 		if (len < 0)
 			return len;
-	}
+	} while (msg != ONCE && !waitret.done);
 	return waitret.done;
 eof:
 	/* Convert early EOF into some semblance of an error */
@@ -489,7 +493,7 @@ fail:
 }
 
 int
-info_tx_commit(int (*cb)(const char *key, const char *value, unsigned int sz))
+info_tx_commit(info_cb_fn cb)
 {
 	int ret;
 
@@ -514,8 +518,8 @@ fail:
 	return -1;
 }
 
-int
-info_loop(int (*cb)(const char *key, const char *value, unsigned int sz))
+static int
+dispatch_until(unsigned char msg, info_cb_fn cb)
 {
 	int ret;
 
@@ -526,10 +530,25 @@ info_loop(int (*cb)(const char *key, const char *value, unsigned int sz))
 		return -1;
 	}
 	waitret.info_cb = cb;
-	ret = wait_until(MSG_EOF);
-	if (ret == -1)
+	ret = wait_until(msg);
+	if (ret == -1) {
+		int errno_save = errno;
 		info_close();
+		errno = errno_save;
+	}
 	return ret;
+}
+
+int
+info_loop(info_cb_fn cb)
+{
+	return dispatch_until(MSG_EOF, cb);
+}
+
+int
+info_recv1(info_cb_fn cb)
+{
+	return dispatch_until(ONCE, cb);
 }
 
 static int

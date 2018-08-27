@@ -383,6 +383,28 @@ int info_tx_commit(info_cb_fn cb);
 int info_loop(info_cb_fn cb);
 
 /**
+ * Reads one message from the connection and dispatches
+ * it to the callback function.
+ *
+ * This function can be called when #poll() or #select()
+ * indicates a ready-for-read condition on FD #info_fileno().
+ *
+ * On error the caller should check if #info_fileno() returns -1.
+ * This indicates the connection was closed. In this condition,
+ * the caller must also arrange for #info_open() to be called
+ * and completed before being able to call #info_recv1() again.
+ *
+ * @param cb callback function for info server messages.
+ *           It should return a positive integer on success.
+ *
+ * @retval -1 The @a cb function returned a negative number.
+ *            #errno was preserved.
+ * @retval -1 [EBADF] The server connection is closed.
+ * @retval -1 Service error, see #errno
+ */
+int info_recv1(info_cb_fn cb);
+
+/**
  * Requests a value read of the server from within a callback.
  *
  * @param key  name of the value
