@@ -7,39 +7,39 @@
 .Nd library routines for key-value-notify service
 .Sh SYNOPSIS
 .In libinfo.h
-.Ss SIMPLE USE
-.Ft "char *"
-.Fn info_reads "const char *key" "char *buf" "unsigned int bufsz"
+.Ss SIMPLE STRING VALUE API
 .Ft int
 .Fn info_writes "const char *key" "const char *strval"
+.Ft "char *"
+.Fn info_reads "const char *key" "char *buf" "unsigned int bufsz"
 .Ft int
 .Fn info_delete "const char *key"
 .Ft int
 .Fn info_exists "const char *key"
-.Ss BINARY VALUE USE
-.Ft int
-.Fn info_read "const char *key" "char *buf" "unsigned int bufsz"
+.Ss BINARY VALUE API
 .Ft int
 .Fn info_write "const char *key" "const char *val" "unsigned int valsz"
-.Ss BULK USE
+.Ft int
+.Fn info_read "const char *key" "char *buf" "unsigned int bufsz"
+.Ss MULTIPLE VALUE API
 .Bd -literal
 struct info_bind {
-    const char *key;        /* NULL for sentinel entry */
-    char *value;            /* NULL for delete */
+    const char *key;        /* NULL means sentinel entry */
+    char *value;            /* NULL means delete */
     unsigned int valuesz;
 }
 .Ed
 .Ft int
-.Fn info_readv "struct info_bind *binds" "char *buf" "unsigned int bufsz"
-.Ft int
 .Fn info_writev "const struct info_bind *binds"
-.Ss TRANSACTIONS
+.Ft int
+.Fn info_readv "struct info_bind *binds" "char *buf" "unsigned int bufsz"
+.Ss TRANSACTION API
 .Ft int
 .Fn info_tx_begin
 .Ft int
-.Fn info_tx_read "const char *key"
-.Ft int
 .Fn info_tx_write "const char *key" "const char *value" "unsigned int valuesz"
+.Ft int
+.Fn info_tx_read "const char *key"
 .Ft int
 .Fn info_tx_delete "const char *key"
 .Ft int
@@ -48,14 +48,14 @@ struct info_bind {
 .Fn info_tx_unsub "const char *pattern"
 .Ft int
 .Fo info_tx_commit
-.Fa "int (*cb)(const char *k" "const char *v" "unsigned int vs)"
+.Fa "int (*cb)(const char *key" "const char *value" "unsigned int valuesz)"
 .Fc
-.Ss NOTIFICATIONS
+.Ss WAITING FOR NOTIFICATIONS
 .Ft int
 .Fo info_sub_wait
-.Fa "int (*cb)(const char *k" "const char *v" "unsigned int vs)"
+.Fa "int (*cb)(const char *key" "const char *value" "unsigned int valuesz)"
 .Fc
-.Ss CALLBACK-SAFE
+.Ss IN-CALLBACK FUNCTIONS
 .Ft int
 .Fn info_cb_read "const char *key"
 .Ft int
@@ -64,27 +64,22 @@ struct info_bind {
 .Fn info_cb_unsub "const char *pattern"
 .Ft void
 .Fn info_cb_close
-.Ss LOW LEVEL
+.Ss MISCELLANEOUS
 .Ft "const char *"
 .Fn info_get_last_error
 .Ft int
 .Fn info_open "const char *server"
 .Vt extern unsigned int info_retries;
-.Ft void
+.Ft int
 .Fn info_close
 .Ft int
 .Fn info_fileno
 .Sh DESCRIPTION
 .Ss INTRODUCTION
 .Nm libinfo
-provides a client C API to the
+provides a C client API for accessing the
 .Xr infod 8
-service,
-a locally-shared key-value store.
-.Pp
-This client API can synchronously read and write
-key values and invoke callback functions on
-asynchronous changes in the store.
+a key-value storage service.
 .Pp
 .Em Keys
 are NUL-terminated UTF-8 strings,
@@ -96,20 +91,26 @@ while key names remain fixed once created.
 The combined size of any key with its value is
 limited to 65535 bytes including the key's
 trailing NUL.
+.Pp
+Besides storing and retreiving values, this
+library permits asynchronous notification for
+when a value is changed by another client.
 .Ss ERROR HANDLING
-In the event of an error, these library functions
-will either return \-1 or NULL and set
+Errors are signaled by a function returning \-1 or NULL.
 .Va errno
-to an indicative value.
+is always set to an error code that indicates the cause.
+.Pp
+The error code
+.Va EPIPE
+is reserved to indicate that a server message
+is available from
+.Fn info_get_last_error .
 .Ss INITIALISATION
 .Nm libinfo
 needs no initialisation.
-The library will connect on demand to the
-.Xr infod 8
-server.
+The library will automatically connect on demand.
 See
-.Fn info_open
-for details.
+.Fn info_open .
 .\" located either by the environment variable
 .\" .Ev INFO_SOCKET
 .\" using or the abstract
@@ -176,8 +177,44 @@ structure, a NULL in the
 .Va value
 field indicates the key does not exists, or should be deleted.
 .Ss TRANSACTIONS
+.Fn info_tx_begin
+tells the server to begin recording commands:
+.Fn info_tx_read ,
+.Fn info_tx_write ,
+.Fn info_tx_delete ,
+.Fn info_tx_sub
+and
+.Fn info_tx_unsub .
+Execute the recorded commands all together with
+.Fn info_tx_commit .
 .Ss NOTIFICATIONS
+.Fn info_sub_wait
+waits for a message from the server, and invokes
+the callback function.
+The loop only terminates if the callback function
+returns 0 or a negative integer, and this
+is passed through as the return value of
+.Fn info_sub_wait .
 .Ss CALLBACK-SAFE
+Some functions are
+.Em not
+safe to call from within a callback
+function:
+.Fn info_read ,
+.Fn info_reads ,
+.Fn info_readv ,
+.Fn info_exists ,
+.Fn info_close
+and any of the transaction functions.
+These functions will all return an EBUSY error
+when called from a callback.
+.Pp
+Instead, use
+.Fn info_cb_read ,
+.Fn info_cb_sub ,
+.Fn info_cb_unsub
+and
+.Fn info_cb_close .
 .Ss LOW LEVEL
 .Fn info_get_last_error
 returns the last error message received by the server.
