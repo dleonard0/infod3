@@ -249,7 +249,7 @@ returns the last error message received by the server.
 is automatically called by all other functions to open
 the socket to the server.
 It will always attempt to contact the server
-.Va info_retries
+.Va info_retries Ns No \&+1
 times before deciding to fail.
 .Pp
 .Fn info_close
