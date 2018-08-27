@@ -52,7 +52,7 @@ struct info_bind {
 .Fc
 .Ss WAITING FOR NOTIFICATIONS
 .Ft int
-.Fo info_sub_wait
+.Fo info_loop
 .Fa "int (*cb)(const char *key" "const char *value" "unsigned int valuesz)"
 .Fc
 .Ss IN-CALLBACK FUNCTIONS
@@ -188,13 +188,13 @@ and
 Execute the recorded commands all together with
 .Fn info_tx_commit .
 .Ss NOTIFICATIONS
-.Fn info_sub_wait
+.Fn info_loop
 waits for a message from the server, and invokes
 the callback function.
 The loop only terminates if the callback function
 returns 0 or a negative integer, and this
 is passed through as the return value of
-.Fn info_sub_wait .
+.Fn info_loop .
 .Ss CALLBACK-SAFE
 Some functions are
 .Em not

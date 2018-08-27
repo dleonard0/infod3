@@ -155,7 +155,7 @@ on_input(struct proto *p, unsigned char msg,
 		}
 	}
 	if (msg == MSG_INFO && waitret.info_cb) {
-		/* called from info_tx_commit() / info_sub_wait() */
+		/* called from info_tx_commit() / info_loop() */
 		int keylen = strlen(data);
 		unsigned int valuesz;
 		const char *value;
@@ -172,7 +172,7 @@ on_input(struct proto *p, unsigned char msg,
 		cb_ret = waitret.info_cb(data, value, valuesz);
 		waitret.in_cb = 0;
 		if (cb_ret == 0 && waitret.until_msg == MSG_EOF) {
-			/* The callback function for info_sub_wait()
+			/* The callback function for info_loop()
 			 * returned 0, which we'll interpret to mean
 			 * "that's enough". */
 			waitret.done++;
@@ -515,7 +515,7 @@ fail:
 }
 
 int
-info_sub_wait(int (*cb)(const char *key, const char *value, unsigned int sz))
+info_loop(int (*cb)(const char *key, const char *value, unsigned int sz))
 {
 	int ret;
 

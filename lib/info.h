@@ -162,7 +162,7 @@ int info_writev(const struct info_bind *binds);
  * This function is called automatically by
  *	#info_exists(), #info_read(), #info_reads(), #info_readv(),
  *	#info_write(), #info_writes(), #info_writev(), #info_delete(),
- *	#info_tx_begin(), #info_sub_wait()
+ *	#info_tx_begin(), #info_loop()
  *
  * @param server path to the server socket, or NULL to use
  *               the environment variable INFOD_SOCKET if
@@ -337,9 +337,9 @@ int info_tx_unsub(const char *pattern);
  * @param value    new value, or NULL to indicate a deletion.
  * @param valuesz  length of the new value
  *
- * @retval -1 Terminate the invoking #info_tx_commit(), #info_sub_wait()
+ * @retval -1 Terminate the invoking #info_tx_commit(), #info_loop()
  *            function. #errno will be passed unchanged to their caller.
- * @retval 0  Successful handling. Terminate the invoking #info_sub_wait().
+ * @retval 0  Successful handling. Terminate the invoking #info_loop().
  * @retval >0 Message was handled; caller should continue waiting for
  *            more messages.
  */
@@ -380,7 +380,7 @@ int info_tx_commit(info_cb_fn cb);
  * @retval -1 [EBADF] The server connection is closed.
  * @retval -1 Service error, see #errno
  */
-int info_sub_wait(info_cb_fn cb);
+int info_loop(info_cb_fn cb);
 
 /**
  * Requests a value read of the server from within a callback.
@@ -390,7 +390,7 @@ int info_sub_wait(info_cb_fn cb);
  * @retval otherwise Request sent.
  *
  * This function can be called from within a callback function
- * invoked by #info_sub_wait().
+ * invoked by #info_loop().
  * The callback should eventually received the requested value.
  */
 int info_cb_read(const char *key);

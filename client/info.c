@@ -259,7 +259,7 @@ main(int argc, char *argv[])
 			}
 			alarm(options.timeout);
 		}
-		if (info_sub_wait(action_cb) == -1)
+		if (info_loop(action_cb) == -1)
 			goto fail;
 	}
 	exit(deleted_count);

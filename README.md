@@ -120,7 +120,7 @@ main()
 	info_tx_begin();
 	info_tx_sub("f*");
 	info_tx_commit(callback); /* Receives first update of f* keys */
-	info_sub_wait(callback);  /* Ongoing receipt of updates */
+	info_loop(callback);  /* Ongoing receipt of updates */
 }
 ```
 
